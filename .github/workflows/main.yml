@@ -1,0 +1,30 @@
+name: Build APK
+on:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.4'
+          channel: stable
+      - name: Install flet
+        run: pip install flet==0.82.2
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Build APK
+        run: flet build apk
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: hasiba-apk
+          path: build/apk/*.apk
