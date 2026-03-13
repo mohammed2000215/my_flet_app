@@ -24,7 +24,7 @@ jobs:
       - name: Build APK
         run: flet build apk
       - name: Upload APK
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: hasiba-apk
           path: build/apk/*.apk
