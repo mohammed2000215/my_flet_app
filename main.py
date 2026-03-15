@@ -58,25 +58,39 @@ DEFAULT_SETTINGS = {
 
 
 def load_data(page):
-    """تحميل البيانات من client_storage (يعمل على أندرويد وLinux وWindows)"""
-    try:
-        saved_json = page.client_storage.get("hasiba.data")
-        if saved_json:
-            saved = json.loads(saved_json)
+    data_file = _get_data_file()
+    if os.path.exists(data_file):
+        try:
+            with open(data_file, "r", encoding="utf-8") as f:
+                saved = json.load(f)
             merged = DEFAULT_SETTINGS.copy()
             merged.update(saved)
             return merged
-    except Exception as ex:
-        print(f"خطأ في التحميل: {ex}")
+        except Exception as ex:
+            print(f"خطأ في التحميل: {ex}")
     return DEFAULT_SETTINGS.copy()
 
 
 def save_data(data, page):
-    """حفظ البيانات في client_storage (يعمل على أندرويد وLinux وWindows)"""
+    data_file = _get_data_file()
     try:
-        page.client_storage.set("hasiba.data", json.dumps(data, ensure_ascii=False))
+        with open(data_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as ex:
         print(f"خطأ في الحفظ: {ex}")
+
+
+def _get_data_file():
+    # المسار الخاص بتطبيق Flet
+    app_storage = os.getenv("FLET_APP_STORAGE_DATA")
+
+    if not app_storage:
+        # fallback ثابت يعمل على Android و Desktop
+        app_storage = os.path.join(os.path.expanduser("~"), ".hasiba")
+
+    os.makedirs(app_storage, exist_ok=True)
+
+    return os.path.join(app_storage, "hasiba_data.json")
 
 
 def make_card(content, color):
@@ -215,6 +229,37 @@ def main(page: ft.Page):
     page.window_height = 820
 
     SETTINGS = load_data(page)
+
+    # ── فهرس البحث السريع للمهن ──────────────────
+    _mihna_index = {}
+
+    def rebuild_index():
+        _mihna_index.clear()
+        for m in SETTINGS.get("mihna_list", []):
+            _mihna_index[str(m["ramz"])] = m
+            for word in m["ism"].lower().split():
+                _mihna_index.setdefault(word, [])
+                if isinstance(_mihna_index[word], list):
+                    _mihna_index[word].append(m)
+
+    def search_mihna(query):
+        query = query.strip().lower()
+        if not query:
+            return []
+        seen = set()
+        results = []
+        for m in SETTINGS.get("mihna_list", []):
+            key = m["ramz"]
+            if key in seen:
+                continue
+            if query in m["ism"].lower() or query in str(m["ramz"]):
+                seen.add(key)
+                results.append(m)
+                if len(results) >= 5:
+                    break
+        return results
+
+    rebuild_index()
 
     GREEN      = SETTINGS["color_green"]
     BLUE       = SETTINGS["color_blue"]
@@ -396,10 +441,7 @@ def main(page: ft.Page):
                 page.update()
                 return
 
-            matches = [
-                m for m in SETTINGS.get("mihna_list", [])
-                if query.lower() in m["ism"].lower() or query in str(m["ramz"])
-            ]
+            matches = search_mihna(query)
 
             if matches:
                 suggestions_col.visible = True
@@ -535,6 +577,7 @@ def main(page: ft.Page):
                         def do_delete(e):
                             SETTINGS["mihna_list"].pop(i)
                             save_data(SETTINGS, page)
+                            rebuild_index()
                             refresh_list()
                             page.update()
                         return do_delete
@@ -592,6 +635,7 @@ def main(page: ft.Page):
 
                 add_msg.color = "green"
                 save_data(SETTINGS, page)
+                rebuild_index()
                 ism_f.value = ramz_f.value = ayam_f.value = nisba_f.value = ""
                 refresh_list()
                 page.update()
