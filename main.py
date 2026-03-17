@@ -267,8 +267,8 @@ def result_row(label, value, size=15):
     except (TypeError, ValueError, OverflowError):
         val_int = 0
     return ft.Row([
-        ft.Text(label, size=size - 1, color="#6B7280"),
-        ft.Text(f"{val_int:,}", size=size, weight="bold", color="#1C1C1C"),
+        ft.Text(label, size=size - 1, color=None),
+        ft.Text(f"{val_int:,}", size=size, weight="bold", color=None),
     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
 
@@ -380,7 +380,7 @@ def validate_number(field, label="القيمة", min_val=0.001, max_val=MAX_VALU
 def section_divider(text):
     return ft.Row([
         ft.Container(height=1, expand=True, bgcolor="#E0E0E0"),
-        ft.Text(f"  {text}  ", size=12, color="#9E9E9E"),
+        ft.Text(f"  {text}  ", size=12, color=None),
         ft.Container(height=1, expand=True, bgcolor="#E0E0E0"),
     ], vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
@@ -526,11 +526,11 @@ def main(page: ft.Page):
                         border_radius=12,
                         alignment=ft.Alignment.CENTER,
                     ),
-                    title=ft.Text(title, weight="bold", size=14),
+                    title=ft.Text(title, weight="bold", size=14, color=None),
                     subtitle=ft.Text(subtitle, size=12,
-                                     color="#6B7280"),
+                                     color=None),
                     trailing=ft.Icon(ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
-                                     size=14, color="#9E9E9E"),
+                                     size=14, color=None),
                     on_click=handler,
                 ),
                 elevation=1,
@@ -737,7 +737,10 @@ def main(page: ft.Page):
                                         weight="bold", size=14),
                             ], spacing=8),
                             ft.Container(height=4),
-                            ft.Row([nafaqat_f, idara_f, rawatib_f],
+                            ft.Row([nafaqat_f, idara_f],
+                                   alignment=ft.MainAxisAlignment.CENTER,
+                                   spacing=8),
+                            ft.Row([rawatib_f],
                                    alignment=ft.MainAxisAlignment.CENTER),
                         ], spacing=8),
                         padding=ft.padding.all(16),
@@ -749,7 +752,7 @@ def main(page: ft.Page):
                 income_f,
                 ft.Container(height=4),
                 ft.Text("عدد السنوات", size=13,
-                        color="#6B7280"),
+                        color=None),
                 years_seg,
                 mult_dd,
                 ft.Container(height=4),
@@ -850,15 +853,15 @@ def main(page: ft.Page):
                             ft.Row([
                                 ft.Row([
                                     ft.Icon(ft.Icons.CALENDAR_TODAY_OUTLINED,
-                                            size=14, color="#9E9E9E"),
+                                            size=14, color=None),
                                     ft.Text(f"{int(m['ayam'])} يوم",
-                                            size=13, color="#6B7280"),
+                                            size=13, color=None),
                                 ], spacing=4),
                                 ft.Row([
                                     ft.Icon(ft.Icons.PERCENT_ROUNDED,
-                                            size=14, color="#9E9E9E"),
+                                            size=14, color=None),
                                     ft.Text(f"ربح {m['nisba']}%",
-                                            size=13, color="#6B7280"),
+                                            size=13, color=None),
                                 ], spacing=4),
                             ], alignment=ft.MainAxisAlignment.SPACE_AROUND),
                         ], spacing=8),
@@ -936,7 +939,7 @@ def main(page: ft.Page):
                                 ft.Text(
                                     f"الشريحة {i}  ·  {sh['pct']:.0f}%"
                                     f"  ·  {int(sh['lower']):,} — {upper_str}",
-                                    size=12, color="#6B7280",
+                                    size=12, color=None,
                                 ),
                                 ft.Row([
                                     ft.Text("الوعاء الخاضع:", size=12),
@@ -1134,9 +1137,9 @@ def main(page: ft.Page):
                     ft.Container(height=8),
                     ft.Row([
                         ft.Icon(ft.Icons.LIST_ROUNDED,
-                                color="#6B7280", size=16),
+                                color=None, size=16),
                         ft.Text("المهن المحفوظة", size=13,
-                                color="#6B7280"),
+                                color=None),
                     ], spacing=6),
                     mihna_list_col,
                     ft.Container(height=16),
@@ -1358,7 +1361,7 @@ def main(page: ft.Page):
                     if omla == "old":
                         rows.append(ft.Row([
                             ft.Text("بالعملة الجديدة", size=13,
-                                    color="#6B7280"),
+                                    color=None),
                             ft.Text(f"{safe_ceil(total/100):,}", size=14,
                                     weight="bold",
                                     color="#1565C0"),
@@ -1408,7 +1411,7 @@ def main(page: ft.Page):
                         ft.Container(
                             content=ft.Text(
                                 f"المدة: {sana} سنة  /  {ashhur} شهر  /  {ayam} يوم",
-                                size=13, color="#6B7280"),
+                                size=13, color=None),
                             bgcolor="#F5F5F5",
                             padding=ft.padding.symmetric(horizontal=12, vertical=8),
                             border_radius=10,
@@ -1429,7 +1432,7 @@ def main(page: ft.Page):
                     if omla == "old":
                         rows.append(ft.Row([
                             ft.Text("بالعملة الجديدة", size=13,
-                                    color="#6B7280"),
+                                    color=None),
                             ft.Text(f"{safe_ceil(total/100):,}", size=14,
                                     weight="bold", color="#1565C0"),
                         ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN))
@@ -1446,13 +1449,13 @@ def main(page: ft.Page):
             controls=[
                 ft.Container(height=8),
                 ft.Text("نوع العملة المدخلة", size=13,
-                        color="#6B7280"),
+                        color=None),
                 currency_seg,
                 ft.Container(height=4),
                 bond_f,
                 ft.Container(height=4),
                 ft.Text("مدة السند", size=13,
-                        color="#6B7280"),
+                        color=None),
                 dur_seg,
                 dates_section,
                 ft.Container(height=4),
@@ -1518,7 +1521,7 @@ def main(page: ft.Page):
                                                     color="#00695C"),
                                             ft.Text("لا ضريبة مستحقة",
                                                     size=13,
-                                                    color="#6B7280"),
+                                                    color=None),
                                         ], spacing=2),
                                     ], spacing=12),
                                     ft.Divider(height=12),
@@ -1571,7 +1574,7 @@ def main(page: ft.Page):
                             ft.Text(
                                 f"الشريحة {i}  ·  {sh['pct']:.0f}%"
                                 f"  ·  {int(sh['lower']):,} — {upper_str}",
-                                size=12, color="#6B7280"),
+                                size=12, color=None),
                             ft.Row([
                                 ft.Text("الوعاء:", size=12),
                                 ft.Text(f"{int(sh['wia3']):,}",
@@ -1607,7 +1610,7 @@ def main(page: ft.Page):
                     total_rows += [
                         result_row("المجموع قبل التحويل", total_qabla),
                         ft.Text("÷ 100 تحويل للعملة الجديدة",
-                                size=12, color="#9E9E9E",
+                                size=12, color=None,
                                 italic=True),
                     ]
                 total_rows += [
@@ -1631,7 +1634,7 @@ def main(page: ft.Page):
             controls=[
                 ft.Container(height=8),
                 ft.Text("نوع العملة", size=13,
-                        color="#6B7280"),
+                        color=None),
                 currency_seg,
                 ft.Container(height=4),
                 income_f,
@@ -1662,11 +1665,11 @@ def main(page: ft.Page):
                         border_radius=10,
                         alignment=ft.Alignment.CENTER,
                     ),
-                    title=ft.Text(title, weight="bold", size=14),
+                    title=ft.Text(title, weight="bold", size=14, color=None),
                     subtitle=ft.Text(subtitle, size=11,
-                                     color="#6B7280"),
+                                     color=None),
                     trailing=ft.Icon(ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
-                                     size=14, color="#9E9E9E"),
+                                     size=14, color=None),
                     on_click=handler,
                 ),
                 elevation=1,
@@ -1761,7 +1764,7 @@ def main(page: ft.Page):
                     content=ft.Column([
                         ft.Row([
                             ft.Text(f"الشريحة {idx+1}", size=12,
-                                    color="#6B7280",
+                                    color=None,
                                     weight="bold"),
                             ft.Container(expand=True),
                             ft.IconButton(
@@ -1865,11 +1868,11 @@ def main(page: ft.Page):
                 ft.Container(height=8),
                 ft.Row([
                     ft.Icon(ft.Icons.LAYERS_OUTLINED,
-                            color="#6B7280", size=16),
+                            color=None, size=16),
                     ft.Text("الشرائح الضريبية", size=13, weight="bold",
-                            color="#6B7280"),
+                            color=None),
                     ft.Text("  (∞ = بلا حد)", size=11,
-                            color="#9E9E9E", italic=True),
+                            color=None, italic=True),
                 ], spacing=4),
                 brackets_col,
                 tonal_btn("إضافة شريحة جديدة", add_bracket,
