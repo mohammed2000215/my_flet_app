@@ -1,8 +1,14 @@
 """
-حاسبة الدخل - نسخة متطورة
-- قسم جديد: حساب ضريبة الدخل المقطوع مع إدارة المهن
-- حفظ دائم للمهن والإعدادات
-- إمكانية تعديل النسب والشرائح
+حاسبة الدخل - نسخة حديثة
+تحسينات التصميم:
+  1. Material You / M3 مع دعم الوضع الليلي
+  2. AppBar حديث مع زر الإعدادات
+  3. ListTile بدلاً من أزرار القائمة
+  4. SegmentedButton بدلاً من RadioGroup
+  5. TextField مع أيقونات
+  6. Card مع ظلال ناعمة للنتائج
+  7. Material Icons بدلاً من الإيموجي
+  8. ألوان هادئة للنتائج
 """
 
 import flet as ft
@@ -12,23 +18,23 @@ import os
 from datetime import datetime, date
 
 # ══════════════════════════════════════
-#  مسار ملف الحفظ
+#  ثوابت الحماية
 # ══════════════════════════════════════
+MAX_VALUE        = 999_999_999_999
+MAX_BRACKETS     = 20
+MAX_MIHNA        = 500
+MAX_STR_LEN      = 200
+MAX_SEARCH_QUERY = 100
 
 
-
+# ══════════════════════════════════════
+#  الإعدادات الافتراضية
+# ══════════════════════════════════════
 DEFAULT_SETTINGS = {
     "nafaqat_default": 3,
     "idara_default": 10,
     "rawatib_default": 10,
     "rasm_idara_pct": 0.10,
-    "color_green": "#2E7D32",
-    "color_blue": "#1565C0",
-    "color_red": "#C62828",
-    "color_dark_green": "#006400",
-    "color_purple": "#6A1B9A",
-    "color_teal": "#00695C",
-    "color_orange": "#E65100",
     "arbah_old_exempt": 3000000,
     "arbah_old_brackets": [
         [3000000,   10000000,  0.10],
@@ -53,22 +59,111 @@ DEFAULT_SETTINGS = {
         [1000000, 5000000,  0.22],
         [5000000, None,     0.25],
     ],
+    "rea3_faida_pct": 10,
+    "rea3_rasm_pct":  10,
+    "rea3_idara_pct": 10,
     "mihna_list": [],
 }
 
 
+# ══════════════════════════════════════
+#  دوال التحقق والتنظيف
+# ══════════════════════════════════════
+def _is_valid_bracket(b):
+    if not isinstance(b, list) or len(b) != 3:
+        return False
+    try:
+        lower = float(b[0])
+        nisba = float(b[2])
+        if lower < 0 or not (0 < nisba <= 1):
+            return False
+        if b[1] is not None:
+            upper = float(b[1])
+            if upper <= lower:
+                return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _sanitize_brackets(raw, default_key):
+    if not isinstance(raw, list) or len(raw) == 0:
+        return DEFAULT_SETTINGS[default_key]
+    valid = [b for b in raw if _is_valid_bracket(b)]
+    if not valid:
+        return DEFAULT_SETTINGS[default_key]
+    result = []
+    for b in valid[:MAX_BRACKETS]:
+        result.append([
+            float(b[0]),
+            float(b[1]) if b[1] is not None else None,
+            float(b[2]),
+        ])
+    return result
+
+
+def _sanitize_mihna_list(raw):
+    if not isinstance(raw, list):
+        return []
+    clean = []
+    for m in raw[:MAX_MIHNA]:
+        try:
+            if not isinstance(m, dict):
+                continue
+            ism   = str(m.get("ism",   "")).strip()[:MAX_STR_LEN]
+            ramz  = int(float(m.get("ramz",  0)))
+            ayam  = int(float(m.get("ayam",  0)))
+            nisba = float(m.get("nisba", 0))
+            if not ism or ramz <= 0 or ayam <= 0 or not (0 < nisba <= 100):
+                continue
+            clean.append({"ism": ism, "ramz": ramz, "ayam": ayam, "nisba": nisba})
+        except (TypeError, ValueError, KeyError):
+            continue
+    return clean
+
+
+def _sanitize_float(val, default, min_val=0, max_val=MAX_VALUE):
+    try:
+        v = float(val)
+        if not math.isfinite(v):
+            return default
+        return max(min_val, min(max_val, v))
+    except (TypeError, ValueError):
+        return default
+
+
+# ══════════════════════════════════════
+#  تحميل وحفظ البيانات
+# ══════════════════════════════════════
 def load_data(page):
     data_file = _get_data_file()
-    if os.path.exists(data_file):
-        try:
-            with open(data_file, "r", encoding="utf-8") as f:
-                saved = json.load(f)
-            merged = DEFAULT_SETTINGS.copy()
-            merged.update(saved)
-            return merged
-        except Exception as ex:
-            print(f"خطأ في التحميل: {ex}")
-    return DEFAULT_SETTINGS.copy()
+    if not os.path.exists(data_file):
+        return DEFAULT_SETTINGS.copy()
+    try:
+        with open(data_file, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if not isinstance(raw, dict):
+            return DEFAULT_SETTINGS.copy()
+        merged = DEFAULT_SETTINGS.copy()
+        merged.update(raw)
+        merged["nafaqat_default"] = _sanitize_float(merged.get("nafaqat_default", 3),   3,  0, 100)
+        merged["idara_default"]   = _sanitize_float(merged.get("idara_default",   10), 10,  0, 100)
+        merged["rawatib_default"] = _sanitize_float(merged.get("rawatib_default", 10), 10,  0, 100)
+        merged["rasm_idara_pct"]  = _sanitize_float(merged.get("rasm_idara_pct",  0.10), 0.10, 0, 1)
+        merged["rea3_faida_pct"]  = _sanitize_float(merged.get("rea3_faida_pct", 10), 10, 0, 100)
+        merged["rea3_rasm_pct"]   = _sanitize_float(merged.get("rea3_rasm_pct",  10), 10, 0, 100)
+        merged["rea3_idara_pct"]  = _sanitize_float(merged.get("rea3_idara_pct", 10), 10, 0, 100)
+        merged["arbah_old_exempt"] = _sanitize_float(merged.get("arbah_old_exempt", 3000000), 3000000, 0)
+        merged["arbah_new_exempt"] = _sanitize_float(merged.get("arbah_new_exempt", 30000),   30000,   0)
+        merged["maqtou3_exempt"]   = _sanitize_float(merged.get("maqtou3_exempt",   30000),   30000,   0)
+        merged["arbah_old_brackets"] = _sanitize_brackets(merged.get("arbah_old_brackets"), "arbah_old_brackets")
+        merged["arbah_new_brackets"] = _sanitize_brackets(merged.get("arbah_new_brackets"), "arbah_new_brackets")
+        merged["maqtou3_brackets"]   = _sanitize_brackets(merged.get("maqtou3_brackets"),   "maqtou3_brackets")
+        merged["mihna_list"] = _sanitize_mihna_list(merged.get("mihna_list", []))
+        return merged
+    except Exception as ex:
+        print(f"[load_data] خطأ: {ex}")
+        return DEFAULT_SETTINGS.copy()
 
 
 def save_data(data, page):
@@ -77,215 +172,329 @@ def save_data(data, page):
         with open(data_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as ex:
-        print(f"خطأ في الحفظ: {ex}")
+        print(f"[save_data] خطأ: {ex}")
 
 
 def _get_data_file():
-    # المسار الخاص بتطبيق Flet
     app_storage = os.getenv("FLET_APP_STORAGE_DATA")
-
     if not app_storage:
-        # fallback ثابت يعمل على Android و Desktop
         app_storage = os.path.join(os.path.expanduser("~"), ".hasiba")
-
-    os.makedirs(app_storage, exist_ok=True)
-
+    try:
+        os.makedirs(app_storage, exist_ok=True)
+    except Exception:
+        app_storage = os.path.expanduser("~")
     return os.path.join(app_storage, "hasiba_data.json")
 
 
-def make_card(content, color):
-    return ft.Container(
-        content=content,
-        bgcolor=color,
-        padding=15,
-        border_radius=12,
+# ══════════════════════════════════════
+#  دوال الحساب الآمنة
+# ══════════════════════════════════════
+def safe_ceil(val):
+    try:
+        if not math.isfinite(val):
+            return 0
+        return math.ceil(val)
+    except (TypeError, OverflowError):
+        return 0
+
+
+def calc_maqtou3_tax(ribh_safi, brackets, exempt):
+    tafaseel    = []
+    dariba_klia = 0
+    if not brackets or ribh_safi <= 0:
+        return tafaseel, dariba_klia
+    for bracket in brackets:
+        try:
+            lower     = float(bracket[0])
+            nisba     = float(bracket[2])
+            upper_val = float(bracket[1]) if bracket[1] is not None else float("inf")
+            if not math.isfinite(lower) or not (0 < nisba <= 1):
+                continue
+            if ribh_safi <= lower:
+                break
+            wia3 = min(ribh_safi, upper_val) - lower
+            if wia3 <= 0:
+                continue
+            if lower <= 1:
+                wia3_taxable = max(0, min(ribh_safi, upper_val) - exempt)
+            else:
+                wia3_taxable = wia3
+            sh_d = safe_ceil(round(wia3_taxable * nisba, 8)) if wia3_taxable > 0 else 0
+            dariba_klia += sh_d
+            tafaseel.append({
+                "pct": nisba * 100, "lower": lower, "upper": upper_val,
+                "wia3": wia3, "wia3_taxable": wia3_taxable, "dariba": sh_d,
+            })
+        except (TypeError, ValueError, IndexError):
+            continue
+    return tafaseel, dariba_klia
+
+
+def calc_arbah_brackets(mablagh, brackets):
+    tafaseel    = []
+    dariba_klia = 0
+    if not brackets or mablagh <= 0:
+        return tafaseel, dariba_klia
+    for bracket in brackets:
+        try:
+            lower     = float(bracket[0])
+            nisba     = float(bracket[2])
+            upper_val = float(bracket[1]) if bracket[1] is not None else float("inf")
+            if not math.isfinite(lower) or not (0 < nisba <= 1):
+                continue
+            if mablagh <= lower:
+                break
+            wia3 = min(mablagh, upper_val) - lower
+            if wia3 <= 0:
+                continue
+            sh_d = safe_ceil(round(wia3 * nisba, 8))
+            dariba_klia += sh_d
+            tafaseel.append({
+                "pct": nisba * 100, "lower": lower, "upper": upper_val,
+                "wia3": wia3, "dariba": sh_d,
+            })
+        except (TypeError, ValueError, IndexError):
+            continue
+    return tafaseel, dariba_klia
+
+
+# ══════════════════════════════════════
+#  دوال UI مساعدة حديثة
+# ══════════════════════════════════════
+def result_row(label, value, size=15):
+    try:
+        val_int = int(value)
+    except (TypeError, ValueError, OverflowError):
+        val_int = 0
+    return ft.Row([
+        ft.Text(label, size=size - 1, color="#6B7280"),
+        ft.Text(f"{val_int:,}", size=size, weight="bold", color="#1C1C1C"),
+    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+
+
+def result_row_white(label, value, size=15):
+    """نسخة بيضاء لبطاقات ملونة"""
+    try:
+        val_int = int(value)
+    except (TypeError, ValueError, OverflowError):
+        val_int = 0
+    return ft.Row([
+        ft.Text(label, size=size - 1, color="#ffffffcc"),
+        ft.Text(f"{val_int:,}", size=size, weight="bold", color="white"),
+    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+
+
+def make_result_card(content, color=None, elevation=2):
+    """بطاقة نتائج حديثة"""
+    if color:
+        return ft.Container(
+            content=content,
+            bgcolor=color,
+            padding=ft.padding.all(16),
+            border_radius=16,
+            margin=ft.margin.symmetric(vertical=5),
+        )
+    return ft.Card(
+        content=ft.Container(
+            content=content,
+            padding=ft.padding.all(16),
+        ),
+        elevation=elevation,
         margin=ft.margin.symmetric(vertical=5),
     )
 
 
-def result_row(label, value, size=16):
-    return ft.Text(f"{label}: {int(value):,}", color="white", size=size)
-
-
-def section_title(text, color):
-    return ft.Text(text, size=22, weight="bold", color=color, text_align="center")
-
-
-def num_field(label, value="", hint="", width=None):
+def num_field(label, value="", hint="", width=None, icon=None):
     kwargs = dict(
         label=label,
         value=str(value),
         hint_text=hint,
         keyboard_type=ft.KeyboardType.NUMBER,
-        border_radius=10,
-        text_size=16,
-        content_padding=ft.padding.symmetric(horizontal=12, vertical=14),
+        border=ft.InputBorder.OUTLINE,
+        border_radius=14,
+        text_size=15,
+        filled=True,
+        content_padding=ft.padding.symmetric(horizontal=14, vertical=16),
     )
     if width:
         kwargs["width"] = width
+    if icon:
+        kwargs["prefix_icon"] = icon
     return ft.TextField(**kwargs)
 
 
-def text_field(label, value="", hint="", width=None):
+def text_field(label, value="", hint="", width=None, icon=None):
     kwargs = dict(
         label=label,
         value=str(value),
         hint_text=hint,
-        border_radius=10,
-        text_size=16,
-        content_padding=ft.padding.symmetric(horizontal=12, vertical=14),
+        border=ft.InputBorder.OUTLINE,
+        border_radius=14,
+        text_size=15,
+        filled=True,
+        content_padding=ft.padding.symmetric(horizontal=14, vertical=16),
     )
     if width:
         kwargs["width"] = width
+    if icon:
+        kwargs["prefix_icon"] = icon
     return ft.TextField(**kwargs)
 
 
-def validate_number(field, label="القيمة"):
+def validate_number(field, label="القيمة", min_val=0.001, max_val=MAX_VALUE,
+                    allow_zero=False):
     raw = (field.value or "").strip()
     if not raw:
-        field.error_text = f"يرجى ادخال {label}"
+        field.error_text = f"يرجى إدخال {label}"
         field.update()
         return None
     try:
         val = float(raw)
-        if val <= 0:
-            field.error_text = "يجب ان يكون الرقم اكبر من صفر"
-            field.update()
-            return None
-        field.error_text = None
-        field.update()
-        return val
     except ValueError:
-        field.error_text = "ارقام فقط"
+        field.error_text = "أرقام فقط"
         field.update()
         return None
+    if not math.isfinite(val):
+        field.error_text = "رقم غير صالح"
+        field.update()
+        return None
+    if allow_zero:
+        if val < 0:
+            field.error_text = "يجب أن يكون صفراً أو أكبر"
+            field.update()
+            return None
+    else:
+        if val <= 0:
+            field.error_text = "يجب أن يكون أكبر من صفر"
+            field.update()
+            return None
+    if val > max_val:
+        field.error_text = f"الحد الأقصى {int(max_val):,}"
+        field.update()
+        return None
+    field.error_text = None
+    field.update()
+    return val
 
 
-def calc_maqtou3_tax(ribh_safi, brackets, exempt):
-    """حساب ضريبة الدخل المقطوع بالشرائح مع الإعفاء في الشريحة الأولى"""
-    tafaseel = []
-    dariba_klia = 0
-    for bracket in brackets:
-        lower = bracket[0]
-        upper = bracket[1]
-        nisba = bracket[2]
-        upper_val = upper if upper is not None else float("inf")
-
-        if ribh_safi <= lower:
-            break
-
-        wia3 = min(ribh_safi, upper_val) - lower
-
-        # الشريحة الأولى: طرح الإعفاء
-        if lower <= 1:
-            wia3_taxable = max(0, min(ribh_safi, upper_val) - exempt)
-        else:
-            wia3_taxable = wia3
-
-        sh_d = math.ceil(round(wia3_taxable * nisba, 8)) if wia3_taxable > 0 else 0
-        dariba_klia += sh_d
-        tafaseel.append({
-            "pct": nisba * 100,
-            "lower": lower,
-            "upper": upper_val,
-            "wia3": wia3,
-            "wia3_taxable": wia3_taxable,
-            "dariba": sh_d,
-        })
-    return tafaseel, dariba_klia
+def section_divider(text):
+    return ft.Row([
+        ft.Container(height=1, expand=True, bgcolor="#E0E0E0"),
+        ft.Text(f"  {text}  ", size=12, color="#9E9E9E"),
+        ft.Container(height=1, expand=True, bgcolor="#E0E0E0"),
+    ], vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
 
-def calc_arbah_brackets(mablagh, brackets):
-    tafaseel = []
-    dariba_klia = 0
-    for bracket in brackets:
-        lower = bracket[0]
-        upper = bracket[1]
-        nisba = bracket[2]
-        upper_val = upper if upper is not None else float("inf")
-        if mablagh <= lower:
-            break
-        wia3 = min(mablagh, upper_val) - lower
-        sh_d = math.ceil(round(wia3 * nisba, 8))
-        dariba_klia += sh_d
-        tafaseel.append({
-            "pct": nisba * 100,
-            "lower": lower,
-            "upper": upper_val,
-            "wia3": wia3,
-            "dariba": sh_d,
-        })
-    return tafaseel, dariba_klia
+def primary_btn(label, handler, icon=None, width=360):
+    return ft.FilledButton(
+        content=ft.Row([
+            ft.Icon(icon, size=18) if icon else ft.Container(width=0),
+            ft.Text(label, size=15, weight="bold"),
+        ], tight=True, spacing=8, alignment=ft.MainAxisAlignment.CENTER),
+        on_click=handler,
+        width=width,
+        height=50,
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=14)),
+    )
 
 
+def tonal_btn(label, handler, icon=None, width=360):
+    return ft.FilledTonalButton(
+        content=ft.Row([
+            ft.Icon(icon, size=18) if icon else ft.Container(width=0),
+            ft.Text(label, size=14),
+        ], tight=True, spacing=8, alignment=ft.MainAxisAlignment.CENTER),
+        on_click=handler,
+        width=width,
+        height=46,
+        style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12)),
+    )
+
+
+# ══════════════════════════════════════
+#  دالة main
+# ══════════════════════════════════════
 def main(page: ft.Page):
-    page.title = "حاسبة الدخل"
-    page.rtl = True
-    page.theme_mode = ft.ThemeMode.LIGHT
-    page.scroll = ft.ScrollMode.AUTO
-    page.padding = ft.padding.symmetric(horizontal=16, vertical=12)
-    page.bgcolor = "#F5F5F5"
-    page.window_width = 420
+    page.title      = "حاسبة الدخل"
+    page.rtl        = True
+    page.theme_mode = ft.ThemeMode.SYSTEM
+    page.theme = ft.Theme(
+        color_scheme_seed="#00695C",
+        use_material3=True,
+    )
+    page.padding = ft.padding.only(left=16, right=16, top=0, bottom=16)
+    page.window_width  = 420
     page.window_height = 820
 
     SETTINGS = load_data(page)
 
-    # ── فهرس البحث السريع للمهن ──────────────────
+    # ── فهرس البحث ──
     _mihna_index = {}
 
     def rebuild_index():
         _mihna_index.clear()
-        for m in SETTINGS.get("mihna_list", []):
-            _mihna_index[str(m["ramz"])] = m
-            for word in m["ism"].lower().split():
-                _mihna_index.setdefault(word, [])
-                if isinstance(_mihna_index[word], list):
-                    _mihna_index[word].append(m)
+        try:
+            for m in SETTINGS.get("mihna_list", []):
+                if not isinstance(m, dict):
+                    continue
+                _mihna_index[str(m.get("ramz", ""))] = m
+                for word in str(m.get("ism", "")).lower().split():
+                    if word:
+                        _mihna_index.setdefault(word, [])
+                        if isinstance(_mihna_index[word], list):
+                            _mihna_index[word].append(m)
+        except Exception as ex:
+            print(f"[rebuild_index] {ex}")
 
     def search_mihna(query):
-        query = query.strip().lower()
-        if not query:
+        try:
+            query = str(query).strip().lower()[:MAX_SEARCH_QUERY]
+            if not query:
+                return []
+            seen, results = set(), []
+            for m in SETTINGS.get("mihna_list", []):
+                if not isinstance(m, dict):
+                    continue
+                key = m.get("ramz")
+                if key in seen:
+                    continue
+                if query in str(m.get("ism", "")).lower() or query in str(m.get("ramz", "")):
+                    seen.add(key)
+                    results.append(m)
+                    if len(results) >= 5:
+                        break
+            return results
+        except Exception as ex:
+            print(f"[search_mihna] {ex}")
             return []
-        seen = set()
-        results = []
-        for m in SETTINGS.get("mihna_list", []):
-            key = m["ramz"]
-            if key in seen:
-                continue
-            if query in m["ism"].lower() or query in str(m["ramz"]):
-                seen.add(key)
-                results.append(m)
-                if len(results) >= 5:
-                    break
-        return results
 
     rebuild_index()
 
-    GREEN      = SETTINGS["color_green"]
-    BLUE       = SETTINGS["color_blue"]
-    RED        = SETTINGS["color_red"]
-    DARK_GREEN = SETTINGS["color_dark_green"]
-    PURPLE     = SETTINGS["color_purple"]
-    TEAL       = SETTINGS["color_teal"]
-    ORANGE     = SETTINGS["color_orange"]
-
-    def back_btn(dest):
-        return ft.OutlinedButton(
-            "العودة للقائمة الرئيسية",
-            on_click=dest, width=360, height=46,
-            style=ft.ButtonStyle(color=DARK_GREEN),
-        )
-
-    def menu_btn(label, color, handler):
-        return ft.ElevatedButton(
-            label, bgcolor=color, color="white",
-            on_click=handler, width=360, height=56,
-        )
-
-    def calc_btn(label, color, handler):
-        return ft.ElevatedButton(
-            label, bgcolor=color, color="white",
-            width=360, height=50, on_click=handler,
+    # ══════════════════════════════════════
+    #  AppBar مشترك
+    # ══════════════════════════════════════
+    def set_appbar(title, show_back=True, show_settings_icon=False):
+        actions = []
+        if show_settings_icon:
+            actions.append(
+                ft.IconButton(
+                    ft.Icons.SETTINGS_OUTLINED,
+                    on_click=show_settings,
+                    tooltip="الإعدادات",
+                )
+            )
+        page.appbar = ft.AppBar(
+            leading=ft.IconButton(
+                ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED,
+                on_click=show_home,
+                tooltip="القائمة الرئيسية",
+            ) if show_back else None,
+            leading_width=48,
+            title=ft.Text(title, size=18, weight="bold"),
+            center_title=True,
+            bgcolor="#F5F5F5",
+            elevation=0,
+            actions=actions,
         )
 
     # ══════════════════════════════════════
@@ -293,27 +502,83 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_home(e=None):
         page.controls.clear()
+        page.appbar = ft.AppBar(
+            title=ft.Text("حاسبة الدخل", size=20, weight="bold"),
+            center_title=True,
+            bgcolor="#F5F5F5",
+            elevation=0,
+            actions=[
+                ft.IconButton(
+                    ft.Icons.SETTINGS_OUTLINED,
+                    on_click=show_settings,
+                    tooltip="الإعدادات",
+                )
+            ],
+        )
+
+        def menu_tile(title, subtitle, icon, color, handler):
+            return ft.Card(
+                content=ft.ListTile(
+                    leading=ft.Container(
+                        content=ft.Icon(icon, color="white", size=22),
+                        bgcolor=color,
+                        width=44, height=44,
+                        border_radius=12,
+                        alignment=ft.Alignment.CENTER,
+                    ),
+                    title=ft.Text(title, weight="bold", size=14),
+                    subtitle=ft.Text(subtitle, size=12,
+                                     color="#6B7280"),
+                    trailing=ft.Icon(ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
+                                     size=14, color="#9E9E9E"),
+                    on_click=handler,
+                ),
+                elevation=1,
+                margin=ft.margin.symmetric(vertical=4),
+                shape=ft.RoundedRectangleBorder(radius=16),
+            )
+
         page.add(ft.Column(
             controls=[
-                ft.Container(height=20),
-                ft.Text("حاسبة الدخل", size=30, weight="bold",
-                        color=DARK_GREEN, text_align="center"),
-                ft.Container(height=4),
-                ft.Text("اختر نوع العملية المراد حسابها",
-                        size=15, color="grey", text_align="center"),
-                ft.Container(height=24),
-                menu_btn("حساب تحققات الدخل المقطوع", GREEN,  show_maqtou3),
-                ft.Container(height=10),
-                menu_btn("ضريبة الدخل المقطوع",        ORANGE, show_dariba_maqtou3),
-                ft.Container(height=10),
-                menu_btn("ريع رؤوس الاموال المتداولة",  BLUE,   show_rea3),
-                ft.Container(height=10),
-                menu_btn("الارباح الحقيقية",             PURPLE, show_arbah),
-                ft.Container(height=10),
-                menu_btn("⚙️ الإعدادات والنسب",          TEAL,   show_settings),
+                ft.Container(height=8),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Icon(ft.Icons.CALCULATE_ROUNDED,
+                                color="white", size=40),
+                        ft.Text("حاسبة الدخل", size=22, weight="bold",
+                                color="white"),
+                        ft.Text("اختر العملية المراد حسابها",
+                                size=13, color="#ffffffcc"),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                       spacing=6),
+                    gradient=ft.LinearGradient(
+                        begin=ft.Alignment.TOP_LEFT,
+                        end=ft.Alignment.BOTTOM_RIGHT,
+                        colors=["#00695C", "#004D40"],
+                    ),
+                    padding=ft.padding.symmetric(horizontal=24, vertical=28),
+                    border_radius=20,
+                    width=400,
+                ),
+                ft.Container(height=16),
+                menu_tile("حساب تحققات الدخل المقطوع",
+                          "احتساب الدخل مع النفقات والرواتب",
+                          ft.Icons.RECEIPT_LONG_OUTLINED, "#2E7D32", show_maqtou3),
+                menu_tile("ضريبة الدخل المقطوع",
+                          "حساب الضريبة حسب المهنة",
+                          ft.Icons.WORK_OUTLINE_ROUNDED, "#E65100", show_dariba_maqtou3),
+                menu_tile("ريع رؤوس الاموال المتداولة",
+                          "حساب ريع السندات والأوراق المالية",
+                          ft.Icons.TRENDING_UP_ROUNDED, "#1565C0", show_rea3),
+                menu_tile("الارباح الحقيقية",
+                          "احتساب ضريبة الأرباح بالشرائح",
+                          ft.Icons.ACCOUNT_BALANCE_OUTLINED, "#6A1B9A", show_arbah),
+                ft.Container(height=8),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            scroll=ft.ScrollMode.AUTO,
             expand=True,
+            spacing=0,
         ))
         page.update()
 
@@ -322,170 +587,290 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_maqtou3(e=None):
         page.controls.clear()
+        set_appbar("تحققات الدخل المقطوع")
 
-        income_f  = num_field("القيمة المراد حسابها", hint="مثال: 500000")
-        nafaqat_f = num_field("نسبة النفقات %",  value=SETTINGS["nafaqat_default"], width=110)
-        idara_f   = num_field("نسبة الادارة %",  value=SETTINGS["idara_default"],   width=110)
-        rawatib_f = num_field("نسبة الرواتب %",  value=SETTINGS["rawatib_default"], width=110)
+        def fmt(v):
+            try:
+                fv = float(v)
+                return str(int(fv)) if fv == int(fv) else str(fv)
+            except Exception:
+                return str(v)
 
-        years_rg = ft.RadioGroup(
-            content=ft.Row(
-                [ft.Radio(value="1", label="سنة واحدة"),
-                 ft.Radio(value="2", label="سنتين")],
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
-            value="1",
+        income_f  = num_field("القيمة المراد حسابها",
+                               hint="مثال: 500,000",
+                               icon=ft.Icons.MONETIZATION_ON_OUTLINED)
+        nafaqat_f = num_field("نسبة النفقات %",
+                               value=fmt(SETTINGS["nafaqat_default"]), width=110)
+        idara_f   = num_field("نسبة الادارة %",
+                               value=fmt(SETTINGS["idara_default"]),   width=110)
+        rawatib_f = num_field("نسبة الرواتب %",
+                               value=fmt(SETTINGS["rawatib_default"]), width=110)
+
+        years_seg = ft.SegmentedButton(
+            segments=[
+                ft.Segment(value="1", label=ft.Text("سنة واحدة"),
+                           icon=ft.Icon(ft.Icons.LOOKS_ONE_OUTLINED)),
+                ft.Segment(value="2", label=ft.Text("سنتين"),
+                           icon=ft.Icon(ft.Icons.LOOKS_TWO_OUTLINED)),
+            ],
+            selected=["1"],
+            allow_multiple_selection=False,
         )
         mult_dd = ft.Dropdown(
-            label="مضاعف السنة الثانية", value="1", visible=False,
-            options=[ft.dropdown.Option(str(i), f"x {i}") for i in range(1, 6)],
+            label="مضاعف السنة الثانية",
+            value="1",
+            visible=False,
+            border_radius=14,
+            filled=True,
+            options=[ft.DropdownOption(key=str(i), text=f"x {i}")
+                     for i in range(1, 6)],
         )
-        results_col = ft.Column(spacing=10)
+        results_col = ft.Column(spacing=8)
 
-        def on_years_change(e):
-            mult_dd.visible = (years_rg.value == "2")
+        def on_seg_change(e):
+            mult_dd.visible = ("2" in years_seg.selected)
             page.update()
-        years_rg.on_change = on_years_change
+        years_seg.on_change = on_seg_change
 
         def calc(e):
             val = validate_number(income_f, "القيمة")
             if val is None:
                 page.update()
                 return
+            np_r = _sanitize_float(nafaqat_f.value, SETTINGS["nafaqat_default"], 0, 100) / 100
+            ip_r = _sanitize_float(idara_f.value,   SETTINGS["idara_default"],   0, 100) / 100
+            rp_r = _sanitize_float(rawatib_f.value, SETTINGS["rawatib_default"], 0, 100) / 100
 
-            np_r = float(nafaqat_f.value or SETTINGS["nafaqat_default"]) / 100
-            ip_r = float(idara_f.value   or SETTINGS["idara_default"])   / 100
-            rp_r = float(rawatib_f.value or SETTINGS["rawatib_default"]) / 100
-
-            d1 = math.ceil(val)
-            n1 = math.ceil(d1 * np_r)
-            i1 = math.ceil(d1 * ip_r)
-            r1 = math.ceil(d1 * rp_r)
+            d1 = safe_ceil(val)
+            n1 = safe_ceil(d1 * np_r)
+            i1 = safe_ceil(d1 * ip_r)
+            r1 = safe_ceil(d1 * rp_r)
             t1 = d1 + n1 + i1 + r1
 
             results_col.controls.clear()
-            results_col.controls.append(make_card(ft.Column([
-                ft.Text("السنة الاولى", weight="bold", size=18, color="white"),
+
+            # بطاقة السنة الأولى
+            results_col.controls.append(make_result_card(ft.Column([
+                ft.Row([
+                    ft.Icon(ft.Icons.LOOKS_ONE_ROUNDED, color="#2E7D32", size=20),
+                    ft.Text("السنة الأولى", weight="bold", size=16,
+                            color="#2E7D32"),
+                ], spacing=6),
+                ft.Divider(height=12),
                 result_row("الدخل",   d1),
                 result_row("النفقات", n1),
                 result_row("الادارة", i1),
                 result_row("الرواتب", r1),
-                ft.Divider(color="white54"),
-                result_row("المجموع", t1, size=17),
-            ]), GREEN))
+                ft.Divider(height=12),
+                ft.Row([
+                    ft.Text("المجموع", weight="bold", size=15),
+                    ft.Text(f"{t1:,}", weight="bold", size=17,
+                            color="#2E7D32"),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ])))
 
             grand = t1
-            if years_rg.value == "2":
-                mult = int(mult_dd.value or 1)
-                d2 = math.ceil(d1 * mult)
-                n2 = math.ceil(d2 * np_r)
-                i2 = math.ceil(d2 * ip_r)
-                r2 = math.ceil(d2 * rp_r)
+            if "2" in years_seg.selected:
+                try:
+                    mult = int(mult_dd.value or 1)
+                    mult = max(1, min(5, mult))
+                except (TypeError, ValueError):
+                    mult = 1
+                d2 = safe_ceil(d1 * mult)
+                n2 = safe_ceil(d2 * np_r)
+                i2 = safe_ceil(d2 * ip_r)
+                r2 = safe_ceil(d2 * rp_r)
                 t2 = d2 + n2 + i2 + r2
                 grand += t2
-                results_col.controls.append(make_card(ft.Column([
-                    ft.Text("السنة الثانية", weight="bold", size=18, color="white"),
+                results_col.controls.append(make_result_card(ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.Icons.LOOKS_TWO_ROUNDED, color="#1565C0", size=20),
+                        ft.Text("السنة الثانية", weight="bold", size=16,
+                                color="#1565C0"),
+                    ], spacing=6),
+                    ft.Divider(height=12),
                     result_row("الدخل",   d2),
                     result_row("النفقات", n2),
                     result_row("الادارة", i2),
                     result_row("الرواتب", r2),
-                    ft.Divider(color="white54"),
-                    result_row("المجموع", t2, size=17),
-                ]), BLUE))
+                    ft.Divider(height=12),
+                    ft.Row([
+                        ft.Text("المجموع", weight="bold", size=15),
+                        ft.Text(f"{t2:,}", weight="bold", size=17,
+                                color="#1565C0"),
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ])))
 
-            results_col.controls.append(make_card(
-                ft.Text(f"الاجمالي الكلي: {int(grand):,}",
-                        weight="bold", size=22, color="white", text_align="center"),
-                RED,
-            ))
+            # بطاقة الإجمالي
+            results_col.controls.append(
+                ft.Container(
+                    content=ft.Row([
+                        ft.Icon(ft.Icons.SUMMARIZE_ROUNDED, color="white", size=22),
+                        ft.Column([
+                            ft.Text("الاجمالي الكلي", color="#ffffffcc", size=13),
+                            ft.Text(f"{grand:,}", color="white",
+                                    size=22, weight="bold"),
+                        ], spacing=2),
+                    ], spacing=14),
+                    gradient=ft.LinearGradient(
+                        begin=ft.Alignment.CENTER_LEFT,
+                        end=ft.Alignment.CENTER_RIGHT,
+                        colors=["#C62828", "#B71C1C"],
+                    ),
+                    padding=ft.padding.symmetric(horizontal=20, vertical=18),
+                    border_radius=16,
+                    margin=ft.margin.symmetric(vertical=5),
+                )
+            )
             page.update()
 
         page.add(ft.Column(
             controls=[
-                section_title("حساب تحققات الدخل المقطوع", DARK_GREEN),
-                ft.Divider(),
-                ft.Text("النسب (قابلة للتعديل):", weight="bold", color=DARK_GREEN),
-                ft.Row([nafaqat_f, idara_f, rawatib_f], alignment=ft.MainAxisAlignment.CENTER),
-                ft.Divider(),
+                ft.Container(height=8),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            ft.Row([
+                                ft.Icon(ft.Icons.PERCENT_ROUNDED,
+                                        color="#00695C", size=18),
+                                ft.Text("النسب القابلة للتعديل",
+                                        weight="bold", size=14),
+                            ], spacing=8),
+                            ft.Container(height=4),
+                            ft.Row([nafaqat_f, idara_f, rawatib_f],
+                                   alignment=ft.MainAxisAlignment.CENTER),
+                        ], spacing=8),
+                        padding=ft.padding.all(16),
+                    ),
+                    elevation=1,
+                    shape=ft.RoundedRectangleBorder(radius=16),
+                ),
+                ft.Container(height=4),
                 income_f,
-                ft.Text("عدد السنوات:", weight="bold"),
-                years_rg, mult_dd,
-                calc_btn("احسب", DARK_GREEN, calc),
+                ft.Container(height=4),
+                ft.Text("عدد السنوات", size=13,
+                        color="#6B7280"),
+                years_seg,
+                mult_dd,
+                ft.Container(height=4),
+                primary_btn("احسب", calc,
+                            icon=ft.Icons.CALCULATE_ROUNDED),
+                ft.Container(height=4),
                 results_col,
                 ft.Container(height=16),
-                back_btn(show_home),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12, expand=True,
+            spacing=10, expand=True, scroll=ft.ScrollMode.AUTO,
         ))
         page.update()
 
     # ══════════════════════════════════════
-    #  2) ضريبة الدخل المقطوع (قسم جديد)
+    #  2) ضريبة الدخل المقطوع
     # ══════════════════════════════════════
     def show_dariba_maqtou3(e=None):
         page.controls.clear()
+        set_appbar("ضريبة الدخل المقطوع")
 
-        search_f = text_field("ابحث باسم أو رمز المهنة", hint="مثال: محامي أو 101")
+        search_f        = text_field("ابحث باسم أو رمز المهنة",
+                                     hint="مثال: محامي أو 101",
+                                     icon=ft.Icons.SEARCH_ROUNDED)
         suggestions_col = ft.Column(spacing=4, visible=False)
-        selected_mihna = {"data": None}
-        mihna_info = ft.Container(visible=False)
-        daily_f = num_field("الدخل اليومي", hint="مثال: 50000")
-        results_col = ft.Column(spacing=10)
+        selected_mihna  = {"data": None}
+        mihna_info      = ft.Container(visible=False)
+        daily_f         = num_field("الدخل اليومي",
+                                    hint="مثال: 50,000",
+                                    icon=ft.Icons.TODAY_OUTLINED)
+        results_col     = ft.Column(spacing=8)
 
         def update_suggestions(e):
-            query = (search_f.value or "").strip()
-            suggestions_col.controls.clear()
-            if len(query) < 1:
-                suggestions_col.visible = False
-                page.update()
-                return
-
-            matches = search_mihna(query)
-
-            if matches:
-                suggestions_col.visible = True
-                for m in matches[:5]:
-                    def make_handler(mihna):
-                        def handler(e):
-                            select_mihna(mihna)
-                        return handler
-                    suggestions_col.controls.append(
-                        ft.ListTile(
-                            title=ft.Text(f"{m['ism']}  ({m['ramz']})", size=14),
-                            subtitle=ft.Text(
-                                f"أيام العمل: {m['ayam']} | نسبة الربح: {m['nisba']}%",
-                                size=12,
-                            ),
-                            on_click=make_handler(m),
-                            bgcolor="#E3F2FD",
-                        )
-                    )
-            else:
-                suggestions_col.visible = False
+            try:
+                query = (search_f.value or "").strip()
+                suggestions_col.controls.clear()
+                if len(query) < 1:
+                    suggestions_col.visible = False
+                    page.update()
+                    return
+                matches = search_mihna(query)
+                if matches:
+                    suggestions_col.visible = True
+                    for m in matches[:5]:
+                        def make_handler(mihna):
+                            def handler(ev):
+                                select_mihna(mihna)
+                            return handler
+                        try:
+                            suggestions_col.controls.append(
+                                ft.ListTile(
+                                    leading=ft.Icon(ft.Icons.WORK_OUTLINE_ROUNDED,
+                                                    color="#00695C"),
+                                    title=ft.Text(f"{m['ism']}  ({m['ramz']})",
+                                                  size=14, weight="bold"),
+                                    subtitle=ft.Text(
+                                        f"أيام: {int(m.get('ayam',0))}  |  ربح: {m.get('nisba',0)}%",
+                                        size=12),
+                                    on_click=make_handler(m),
+                                )
+                            )
+                        except (KeyError, TypeError):
+                            continue
+                else:
+                    suggestions_col.visible = False
+            except Exception as ex:
+                print(f"[update_suggestions] {ex}")
             page.update()
 
         search_f.on_change = update_suggestions
 
         def select_mihna(m):
-            selected_mihna["data"] = m
-            search_f.value = f"{m['ism']} ({m['ramz']})"
-            search_f.error_text = None
-            suggestions_col.visible = False
-            mihna_info.content = ft.Container(
-                content=ft.Column([
-                    ft.Text("المهنة المختارة", weight="bold", size=15, color=ORANGE),
-                    ft.Text(f"الاسم: {m['ism']}", size=14),
-                    ft.Text(f"الرمز: {m['ramz']}", size=14),
-                    ft.Text(f"أيام العمل السنوي: {m['ayam']}", size=14),
-                    ft.Text(f"نسبة الربح: {m['nisba']}%", size=14),
-                ]),
-                bgcolor="#FFF3E0",
-                padding=10,
-                border_radius=10,
-            )
-            mihna_info.visible = True
-            results_col.controls.clear()
+            try:
+                selected_mihna["data"] = m
+                search_f.value         = f"{m['ism']} ({m['ramz']})"
+                search_f.error_text    = None
+                suggestions_col.visible = False
+                mihna_info.content = ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            ft.Row([
+                                ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                                        color="#00695C"),
+                                ft.Text("المهنة المختارة", weight="bold",
+                                        size=14, color="#00695C"),
+                            ], spacing=8),
+                            ft.Divider(height=10),
+                            ft.Row([
+                                ft.Text(m['ism'], weight="bold", size=15),
+                                ft.Container(
+                                    content=ft.Text(f"رمز: {m['ramz']}",
+                                                    size=12, color="white"),
+                                    bgcolor="#00695C",
+                                    padding=ft.padding.symmetric(horizontal=10, vertical=4),
+                                    border_radius=20,
+                                ),
+                            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Row([
+                                ft.Row([
+                                    ft.Icon(ft.Icons.CALENDAR_TODAY_OUTLINED,
+                                            size=14, color="#9E9E9E"),
+                                    ft.Text(f"{int(m['ayam'])} يوم",
+                                            size=13, color="#6B7280"),
+                                ], spacing=4),
+                                ft.Row([
+                                    ft.Icon(ft.Icons.PERCENT_ROUNDED,
+                                            size=14, color="#9E9E9E"),
+                                    ft.Text(f"ربح {m['nisba']}%",
+                                            size=13, color="#6B7280"),
+                                ], spacing=4),
+                            ], alignment=ft.MainAxisAlignment.SPACE_AROUND),
+                        ], spacing=8),
+                        padding=ft.padding.all(14),
+                    ),
+                    elevation=1,
+                    shape=ft.RoundedRectangleBorder(radius=14),
+                )
+                mihna_info.visible = True
+                results_col.controls.clear()
+            except Exception as ex:
+                print(f"[select_mihna] {ex}")
             page.update()
 
         def calc(e):
@@ -493,147 +878,228 @@ def main(page: ft.Page):
                 search_f.error_text = "يرجى اختيار مهنة من القائمة"
                 search_f.update()
                 return
-
             daily = validate_number(daily_f, "الدخل اليومي")
             if daily is None:
                 page.update()
                 return
+            try:
+                m          = selected_mihna["data"]
+                ayam       = int(float(m["ayam"]))
+                nisba_ribh = float(m["nisba"]) / 100
+                if ayam <= 0 or not (0 < nisba_ribh <= 1):
+                    results_col.controls.clear()
+                    results_col.controls.append(make_result_card(
+                        ft.Text("بيانات المهنة غير صحيحة", size=15)))
+                    page.update()
+                    return
 
-            m = selected_mihna["data"]
-            ayam       = m["ayam"]
-            nisba_ribh = m["nisba"] / 100
+                dakhl_sanawi = safe_ceil(daily * ayam)
+                ribh_safi    = safe_ceil(dakhl_sanawi * nisba_ribh)
+                exempt       = SETTINGS["maqtou3_exempt"]
+                brackets     = SETTINGS["maqtou3_brackets"]
+                tafaseel, dariba = calc_maqtou3_tax(ribh_safi, brackets, exempt)
 
-            dakhl_sanawi = math.ceil(daily * ayam)
-            ribh_safi    = math.ceil(dakhl_sanawi * nisba_ribh)
+                results_col.controls.clear()
 
-            exempt   = SETTINGS["maqtou3_exempt"]
-            brackets = SETTINGS["maqtou3_brackets"]
-            tafaseel, dariba = calc_maqtou3_tax(ribh_safi, brackets, exempt)
+                # بطاقة الملخص
+                results_col.controls.append(make_result_card(ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.Icons.SUMMARIZE_OUTLINED,
+                                color="#00695C", size=20),
+                        ft.Text("ملخص الحساب", weight="bold", size=15,
+                                color="#00695C"),
+                    ], spacing=8),
+                    ft.Divider(height=12),
+                    result_row("الدخل اليومي",              safe_ceil(daily)),
+                    result_row("أيام العمل السنوي",          ayam),
+                    result_row("الدخل السنوي الإجمالي",      dakhl_sanawi),
+                    result_row(f"الربح ({m['nisba']}%)",     ribh_safi),
+                    result_row("الحد المعفى",                int(exempt)),
+                ])))
 
-            results_col.controls.clear()
+                # بطاقة الشرائح
+                if tafaseel:
+                    sh_rows = [
+                        ft.Row([
+                            ft.Icon(ft.Icons.LAYERS_OUTLINED,
+                                    color="#1565C0", size=18),
+                            ft.Text("تفصيل الشرائح", weight="bold", size=14,
+                                    color="#1565C0"),
+                        ], spacing=8),
+                        ft.Divider(height=10),
+                    ]
+                    for i, sh in enumerate(tafaseel, 1):
+                        upper_str = (f"{int(sh['upper']):,}"
+                                     if sh["upper"] != float("inf") else "فما فوق")
+                        sh_rows.append(ft.Container(
+                            content=ft.Column([
+                                ft.Text(
+                                    f"الشريحة {i}  ·  {sh['pct']:.0f}%"
+                                    f"  ·  {int(sh['lower']):,} — {upper_str}",
+                                    size=12, color="#6B7280",
+                                ),
+                                ft.Row([
+                                    ft.Text("الوعاء الخاضع:", size=12),
+                                    ft.Text(f"{int(sh['wia3_taxable']):,}",
+                                            size=13, weight="bold"),
+                                    ft.Container(expand=True),
+                                    ft.Text("الضريبة:", size=12),
+                                    ft.Text(f"{int(sh['dariba']):,}",
+                                            size=13, weight="bold",
+                                            color="#C62828"),
+                                ]),
+                            ], spacing=4),
+                            bgcolor="#F5F5F5",
+                            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                            border_radius=10,
+                            margin=ft.margin.symmetric(vertical=3),
+                        ))
+                    results_col.controls.append(make_result_card(ft.Column(sh_rows)))
 
-            rows = [
-                ft.Text("نتيجة حساب ضريبة الدخل المقطوع",
-                        weight="bold", size=17, color="white"),
-                ft.Divider(color="white54"),
-                result_row("الدخل اليومي",              math.ceil(daily)),
-                result_row("أيام العمل السنوي",          ayam),
-                result_row("الدخل السنوي الإجمالي",      dakhl_sanawi),
-                result_row(f"نسبة الربح ({m['nisba']}%)", math.ceil(dakhl_sanawi * nisba_ribh)),
-                result_row("الربح الصافي (وعاء الضريبة)", ribh_safi),
-                result_row("الحد المعفى",                int(exempt)),
-                ft.Divider(color="white54"),
-                ft.Text("تفصيل الشرائح:", color="white70", size=13, weight="bold"),
-            ]
-
-            for i, sh in enumerate(tafaseel, 1):
-                upper_str = f"{int(sh['upper']):,}" if sh["upper"] != float("inf") else "فما فوق"
-                rows.append(ft.Text(
-                    f"الشريحة {i} ({sh['pct']:.0f}%)  من {int(sh['lower']):,} إلى {upper_str}",
-                    color="white70", size=13,
-                ))
-                rows.append(ft.Text(
-                    f"    الوعاء الخاضع: {int(sh['wia3_taxable']):,}  |  الضريبة: {int(sh['dariba']):,}",
-                    color="white", size=14,
-                ))
-
-            rows += [
-                ft.Divider(color="white54"),
-                ft.Text(f"مجموع الضريبة النهائي: {int(dariba):,}",
-                        weight="bold", size=19, color="white"),
-            ]
-
-            results_col.controls.append(make_card(ft.Column(rows), ORANGE))
+                # بطاقة الإجمالي
+                results_col.controls.append(
+                    ft.Container(
+                        content=ft.Row([
+                            ft.Icon(ft.Icons.RECEIPT_ROUNDED, color="white", size=24),
+                            ft.Column([
+                                ft.Text("مجموع الضريبة النهائي",
+                                        color="#ffffffcc", size=13),
+                                ft.Text(f"{int(dariba):,}", color="white",
+                                        size=24, weight="bold"),
+                            ], spacing=2),
+                        ], spacing=14),
+                        gradient=ft.LinearGradient(
+                            begin=ft.Alignment.CENTER_LEFT,
+                            end=ft.Alignment.CENTER_RIGHT,
+                            colors=["#E65100", "#BF360C"],
+                        ),
+                        padding=ft.padding.symmetric(horizontal=20, vertical=18),
+                        border_radius=16,
+                        margin=ft.margin.symmetric(vertical=5),
+                    )
+                )
+            except Exception as ex:
+                print(f"[dariba calc] {ex}")
+                results_col.controls.clear()
+                results_col.controls.append(make_result_card(
+                    ft.Text("حدث خطأ، يرجى التحقق من البيانات", size=14)))
             page.update()
 
-        # ── إدارة المهن ──
-        def show_manage_mihna(e):
+        def show_manage_mihna(ev):
             page.controls.clear()
-            mihna_list_col = ft.Column(spacing=8)
-            ism_f   = text_field("اسم المهنة",           hint="مثال: محامي")
-            ramz_f  = num_field("رمز المهنة",             hint="مثال: 101")
-            ayam_f  = num_field("أيام العمل السنوي",      hint="مثال: 270")
-            nisba_f = num_field("نسبة الربح %",           hint="مثال: 70")
-            add_msg     = ft.Text("", color="green", size=13)
-            edit_index  = {"i": None}
+            set_appbar("إدارة المهن")
+
+            mihna_list_col = ft.Column(spacing=6)
+            ism_f   = text_field("اسم المهنة",       hint="مثال: محامي",
+                                  icon=ft.Icons.PERSON_OUTLINE_ROUNDED)
+            ramz_f  = num_field("رمز المهنة",          hint="مثال: 101",
+                                 icon=ft.Icons.TAG_ROUNDED)
+            ayam_f  = num_field("أيام العمل السنوي",   hint="مثال: 270",
+                                 icon=ft.Icons.CALENDAR_MONTH_OUTLINED)
+            nisba_f = num_field("نسبة الربح %",        hint="مثال: 70",
+                                 icon=ft.Icons.PERCENT_ROUNDED)
+            add_msg    = ft.Text("", size=13)
+            edit_index = {"i": None}
 
             def refresh_list():
                 mihna_list_col.controls.clear()
                 for idx, m in enumerate(SETTINGS["mihna_list"]):
-                    def make_edit(i):
-                        def do_edit(e):
-                            m2 = SETTINGS["mihna_list"][i]
-                            ism_f.value   = m2["ism"]
-                            ramz_f.value  = str(m2["ramz"])
-                            ayam_f.value  = str(m2["ayam"])
-                            nisba_f.value = str(m2["nisba"])
-                            edit_index["i"] = i
-                            add_msg.value = "⚠️ جاري التعديل... اضغط حفظ بعد التعديل"
-                            add_msg.color = "orange"
-                            page.update()
-                        return do_edit
+                    try:
+                        def make_edit(i):
+                            def do_edit(ev2):
+                                try:
+                                    m2 = SETTINGS["mihna_list"][i]
+                                    ism_f.value   = str(m2.get("ism",   ""))
+                                    ramz_f.value  = str(int(m2.get("ramz",  0)))
+                                    ayam_f.value  = str(int(m2.get("ayam",  0)))
+                                    nisba_f.value = str(m2.get("nisba", 0))
+                                    edit_index["i"] = i
+                                    add_msg.value = "جاري التعديل... اضغط حفظ"
+                                    add_msg.color = "#E65100"
+                                except (IndexError, KeyError, TypeError) as ex:
+                                    print(f"[edit] {ex}")
+                                page.update()
+                            return do_edit
 
-                    def make_delete(i):
-                        def do_delete(e):
-                            SETTINGS["mihna_list"].pop(i)
-                            save_data(SETTINGS, page)
-                            rebuild_index()
-                            refresh_list()
-                            page.update()
-                        return do_delete
+                        def make_delete(i):
+                            def do_delete(ev2):
+                                try:
+                                    SETTINGS["mihna_list"].pop(i)
+                                    save_data(SETTINGS, page)
+                                    rebuild_index()
+                                    refresh_list()
+                                except IndexError:
+                                    pass
+                                page.update()
+                            return do_delete
 
-                    mihna_list_col.controls.append(
-                        ft.Container(
-                            content=ft.Row([
-                                ft.Column([
-                                    ft.Text(f"{m['ism']}  [{m['ramz']}]",
-                                            weight="bold", size=14),
-                                    ft.Text(
-                                        f"أيام: {m['ayam']}  |  نسبة الربح: {m['nisba']}%",
-                                        size=12, color="grey",
-                                    ),
-                                ], expand=True, spacing=2),
-                                ft.ElevatedButton("تعديل", bgcolor=BLUE, color="white",
-                                              on_click=make_edit(idx), height=36),
-                                ft.ElevatedButton("حذف", bgcolor=RED, color="white",
-                                              on_click=make_delete(idx), height=36),
-                            ]),
-                            bgcolor="white", padding=10,
-                            border_radius=10,
-                            margin=ft.margin.symmetric(vertical=3),
+                        mihna_list_col.controls.append(
+                            ft.Card(
+                                content=ft.ListTile(
+                                    leading=ft.Icon(ft.Icons.WORK_OUTLINE_ROUNDED,
+                                                    color="#00695C"),
+                                    title=ft.Text(
+                                        f"{m.get('ism','?')}  [{m.get('ramz','?')}]",
+                                        weight="bold", size=14),
+                                    subtitle=ft.Text(
+                                        f"أيام: {m.get('ayam','?')}"
+                                        f"  ·  ربح: {m.get('nisba','?')}%",
+                                        size=12),
+                                    trailing=ft.Row([
+                                        ft.IconButton(
+                                            ft.Icons.EDIT_OUTLINED,
+                                            on_click=make_edit(idx),
+                                            icon_color="#00695C",
+                                            tooltip="تعديل",
+                                        ),
+                                        ft.IconButton(
+                                            ft.Icons.DELETE_OUTLINE_ROUNDED,
+                                            on_click=make_delete(idx),
+                                            icon_color="#C62828",
+                                            tooltip="حذف",
+                                        ),
+                                    ], tight=True, spacing=0),
+                                ),
+                                elevation=1,
+                                margin=ft.margin.symmetric(vertical=3),
+                                shape=ft.RoundedRectangleBorder(radius=14),
+                            )
                         )
-                    )
+                    except Exception as ex:
+                        print(f"[refresh row {idx}] {ex}")
                 page.update()
 
-            def save_mihna(e):
-                ism = (ism_f.value or "").strip()
+            def save_mihna(ev2):
+                ism = (ism_f.value or "").strip()[:MAX_STR_LEN]
                 if not ism:
                     ism_f.error_text = "يرجى إدخال اسم المهنة"
                     ism_f.update()
                     return
                 ramz  = validate_number(ramz_f,  "رمز المهنة")
-                ayam  = validate_number(ayam_f,  "أيام العمل")
-                nisba = validate_number(nisba_f, "نسبة الربح")
+                ayam  = validate_number(ayam_f,  "أيام العمل", max_val=366)
+                nisba = validate_number(nisba_f, "نسبة الربح", max_val=100)
                 if not all([ramz, ayam, nisba]):
                     page.update()
                     return
-
-                new_m = {
-                    "ism":   ism,
-                    "ramz":  int(ramz),
-                    "ayam":  int(ayam),
-                    "nisba": nisba,
-                }
-
+                new_m = {"ism": ism, "ramz": int(ramz),
+                         "ayam": int(ayam), "nisba": nisba}
                 if edit_index["i"] is not None:
-                    SETTINGS["mihna_list"][edit_index["i"]] = new_m
-                    add_msg.value = "✅ تم تعديل المهنة بنجاح"
+                    try:
+                        SETTINGS["mihna_list"][edit_index["i"]] = new_m
+                        add_msg.value = "تم تعديل المهنة بنجاح"
+                    except IndexError:
+                        SETTINGS["mihna_list"].append(new_m)
+                        add_msg.value = "تم إضافة المهنة بنجاح"
                     edit_index["i"] = None
                 else:
+                    if len(SETTINGS["mihna_list"]) >= MAX_MIHNA:
+                        add_msg.value = f"الحد الأقصى {MAX_MIHNA} مهنة"
+                        add_msg.color = "#E65100"
+                        page.update()
+                        return
                     SETTINGS["mihna_list"].append(new_m)
-                    add_msg.value = "✅ تم إضافة المهنة بنجاح"
-
-                add_msg.color = "green"
+                    add_msg.value = "تم إضافة المهنة بنجاح"
+                add_msg.color = "#00695C"
                 save_data(SETTINGS, page)
                 rebuild_index()
                 ism_f.value = ramz_f.value = ayam_f.value = nisba_f.value = ""
@@ -644,52 +1110,68 @@ def main(page: ft.Page):
 
             page.add(ft.Column(
                 controls=[
-                    section_title("إدارة المهن", ORANGE),
-                    ft.Divider(),
-                    ft.Text("إضافة / تعديل مهنة:", weight="bold", color=ORANGE),
-                    ism_f, ramz_f, ayam_f, nisba_f,
-                    calc_btn("💾 حفظ المهنة", ORANGE, save_mihna),
-                    add_msg,
-                    ft.Divider(),
-                    ft.Text("المهن المحفوظة:", weight="bold", color=ORANGE),
+                    ft.Container(height=8),
+                    ft.Card(
+                        content=ft.Container(
+                            content=ft.Column([
+                                ft.Row([
+                                    ft.Icon(ft.Icons.ADD_CIRCLE_OUTLINE_ROUNDED,
+                                            color="#00695C"),
+                                    ft.Text("إضافة / تعديل مهنة",
+                                            weight="bold", size=14),
+                                ], spacing=8),
+                                ft.Divider(height=10),
+                                ism_f, ramz_f, ayam_f, nisba_f,
+                                primary_btn("حفظ المهنة", save_mihna,
+                                            icon=ft.Icons.SAVE_OUTLINED),
+                                add_msg,
+                            ], spacing=10),
+                            padding=ft.padding.all(16),
+                        ),
+                        elevation=1,
+                        shape=ft.RoundedRectangleBorder(radius=16),
+                    ),
+                    ft.Container(height=8),
+                    ft.Row([
+                        ft.Icon(ft.Icons.LIST_ROUNDED,
+                                color="#6B7280", size=16),
+                        ft.Text("المهن المحفوظة", size=13,
+                                color="#6B7280"),
+                    ], spacing=6),
                     mihna_list_col,
                     ft.Container(height=16),
-                    ft.OutlinedButton(
-                        "العودة لحساب الضريبة",
-                        on_click=show_dariba_maqtou3, width=360, height=46,
-                        style=ft.ButtonStyle(color=ORANGE),
-                    ),
-                    back_btn(show_home),
+                    tonal_btn("العودة لحساب الضريبة",
+                              show_dariba_maqtou3,
+                              icon=ft.Icons.ARROW_BACK_ROUNDED),
                 ],
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=12, expand=True,
+                spacing=8, expand=True, scroll=ft.ScrollMode.AUTO,
             ))
             page.update()
 
         page.add(ft.Column(
             controls=[
-                section_title("ضريبة الدخل المقطوع", ORANGE),
-                ft.Divider(),
-                ft.Text("ابحث عن المهنة:", weight="bold", color=ORANGE),
+                ft.Container(height=8),
                 search_f,
-                suggestions_col,
+                ft.Card(
+                    content=suggestions_col,
+                    elevation=2,
+                    visible=True,
+                    shape=ft.RoundedRectangleBorder(radius=14),
+                ),
                 mihna_info,
-                ft.Divider(),
+                ft.Container(height=4),
                 daily_f,
-                calc_btn("احسب الضريبة", ORANGE, calc),
+                primary_btn("احسب الضريبة", calc,
+                            icon=ft.Icons.CALCULATE_ROUNDED),
                 results_col,
                 ft.Container(height=10),
-                ft.ElevatedButton(
-                    "⚙️ إدارة المهن (إضافة / تعديل / حذف)",
-                    bgcolor="#BF360C", color="white",
-                    width=360, height=46,
-                    on_click=show_manage_mihna,
-                ),
-                ft.Container(height=6),
-                back_btn(show_home),
+                tonal_btn("إدارة المهن", show_manage_mihna,
+                          icon=ft.Icons.MANAGE_ACCOUNTS_OUTLINED),
+                ft.Container(height=16),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12, expand=True,
+            spacing=10, expand=True, scroll=ft.ScrollMode.AUTO,
         ))
         page.update()
 
@@ -698,53 +1180,79 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_rea3(e=None):
         page.controls.clear()
+        set_appbar("ريع رؤوس الاموال")
 
-        currency_rg = ft.RadioGroup(
-            content=ft.Row(
-                [ft.Radio(value="old", label="عملة قديمة"),
-                 ft.Radio(value="new", label="عملة جديدة")],
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
-            value="old",
+        currency_seg = ft.SegmentedButton(
+            segments=[
+                ft.Segment(value="old", label=ft.Text("عملة قديمة"),
+                           icon=ft.Icon(ft.Icons.HISTORY_ROUNDED)),
+                ft.Segment(value="new", label=ft.Text("عملة جديدة"),
+                           icon=ft.Icon(ft.Icons.FIBER_NEW_ROUNDED)),
+            ],
+            selected=["old"],
+            allow_multiple_selection=False,
         )
-        currency_note = ft.Text(
-            "العملة القديمة = الأكبر  |  العملة الجديدة = القديمة ÷ 100",
-            size=12, color="grey", italic=True, text_align="center",
-        )
+        bond_f = num_field("قيمة السند",
+                           hint="مثال: 1,000,000",
+                           icon=ft.Icons.ACCOUNT_BALANCE_OUTLINED)
 
-        bond_f = num_field("قيمة السند", hint="مثال: 1000000")
-
-        dur_rg = ft.RadioGroup(
-            content=ft.Row(
-                [ft.Radio(value="1year",  label="سنة واحدة"),
-                 ft.Radio(value="custom", label="تحديد تاريخين")],
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
-            value="1year",
+        dur_seg = ft.SegmentedButton(
+            segments=[
+                ft.Segment(value="1year",  label=ft.Text("سنة واحدة"),
+                           icon=ft.Icon(ft.Icons.CALENDAR_TODAY_OUTLINED)),
+                ft.Segment(value="custom", label=ft.Text("تحديد تاريخين"),
+                           icon=ft.Icon(ft.Icons.DATE_RANGE_OUTLINED)),
+            ],
+            selected=["1year"],
+            allow_multiple_selection=False,
         )
 
         selected_dates = {"bond": None, "today": date.today()}
-        date1_display = ft.Text("لم يتم الاختيار بعد", color="grey", size=14, italic=True)
-        date2_display = ft.Text(
-            f"التاريخ الحالي: {date.today().strftime('%Y-%m-%d')}",
-            color=DARK_GREEN, size=14,
+        date1_btn = ft.OutlinedButton(
+            content=ft.Row([
+                ft.Icon(ft.Icons.CALENDAR_MONTH_OUTLINED, size=16),
+                ft.Text("اختر تاريخ السند", size=13),
+            ], tight=True, spacing=8),
+            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12)),
         )
-        date_error = ft.Text("", color="red", size=13, visible=False)
+        date2_btn = ft.OutlinedButton(
+            content=ft.Row([
+                ft.Icon(ft.Icons.TODAY_ROUNDED, size=16),
+                ft.Text(f"التاريخ الحالي: {date.today().strftime('%Y-%m-%d')}",
+                        size=13),
+            ], tight=True, spacing=8),
+            style=ft.ButtonStyle(shape=ft.RoundedRectangleBorder(radius=12)),
+        )
+        date_error  = ft.Text("", color="#C62828", size=13, visible=False)
 
         def on_bond_date_picked(e):
-            if e.control.value:
-                selected_dates["bond"] = e.control.value.date()
-                date1_display.value  = f"تاريخ السند: {selected_dates['bond'].strftime('%Y-%m-%d')}"
-                date1_display.color  = DARK_GREEN
-                date1_display.italic = False
-                date_error.visible   = False
+            try:
+                if e.control.value:
+                    selected_dates["bond"] = e.control.value.date()
+                    date1_btn.content = ft.Row([
+                        ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                                size=16, color="#00695C"),
+                        ft.Text(f"تاريخ السند: {selected_dates['bond'].strftime('%Y-%m-%d')}",
+                                size=13, color="#00695C"),
+                    ], tight=True, spacing=8)
+                    date_error.visible = False
+            except Exception as ex:
+                print(f"[bond date] {ex}")
             page.update()
 
         def on_today_date_picked(e):
-            if e.control.value:
-                selected_dates["today"] = e.control.value.date()
-                date2_display.value = f"التاريخ الحالي: {selected_dates['today'].strftime('%Y-%m-%d')}"
-                date_error.visible  = False
+            try:
+                if e.control.value:
+                    selected_dates["today"] = e.control.value.date()
+                    date2_btn.content = ft.Row([
+                        ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                                size=16, color="#00695C"),
+                        ft.Text(f"التاريخ الحالي: {selected_dates['today'].strftime('%Y-%m-%d')}",
+                                size=13, color="#00695C"),
+                    ], tight=True, spacing=8)
+                    date_error.visible = False
+            except Exception as ex:
+                print(f"[today date] {ex}")
             page.update()
 
         bond_date_picker = ft.DatePicker(
@@ -761,169 +1269,200 @@ def main(page: ft.Page):
         page.overlay.append(bond_date_picker)
         page.overlay.append(today_date_picker)
 
-        def open_bond_picker(e):
-            bond_date_picker.open = True
-            page.update()
+        date1_btn.on_click = lambda e: setattr(bond_date_picker,  "open", True) or page.update()
+        date2_btn.on_click = lambda e: setattr(today_date_picker, "open", True) or page.update()
 
-        def open_today_picker(e):
-            today_date_picker.open = True
-            page.update()
-
-        dates_section = ft.Column(
-            controls=[
-                ft.Divider(),
-                ft.Text("اختر تاريخ السند:", weight="bold", size=14),
-                ft.Row([
-                    ft.ElevatedButton("اختر التاريخ", bgcolor=TEAL, color="white",
-                                      on_click=open_bond_picker, height=42),
-                    date1_display,
-                ], spacing=12),
-                ft.Container(height=4),
-                ft.Text("اختر التاريخ الحالي:", weight="bold", size=14),
-                ft.Row([
-                    ft.ElevatedButton("اختر التاريخ", bgcolor=TEAL, color="white",
-                                      on_click=open_today_picker, height=42),
-                    date2_display,
-                ], spacing=12),
-                date_error,
-            ],
-            visible=False, spacing=8,
+        dates_section = ft.Card(
+            content=ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.Icons.DATE_RANGE_OUTLINED,
+                                color="#00695C", size=18),
+                        ft.Text("تحديد تاريخ السند والتاريخ الحالي",
+                                weight="bold", size=13),
+                    ], spacing=8),
+                    ft.Divider(height=10),
+                    date1_btn,
+                    date2_btn,
+                    date_error,
+                ], spacing=10),
+                padding=ft.padding.all(14),
+            ),
+            elevation=1,
+            visible=False,
+            shape=ft.RoundedRectangleBorder(radius=14),
         )
-        results_col = ft.Column(spacing=10)
+        results_col = ft.Column(spacing=8)
 
         def on_dur_change(e):
-            dates_section.visible = (dur_rg.value == "custom")
+            dates_section.visible = ("custom" in dur_seg.selected)
             page.update()
-        dur_rg.on_change = on_dur_change
-
-        def _build_rea3_card(title_text, qima_orig, omla,
-                              rasm, idara, faida,
-                              tr=None, sana=None, ashhur=None, ayam=None,
-                              rs=None, ra=None, rd=None,
-                              is_multi=False):
-            div = 100 if omla == "new" else 1
-
-            def v(x):
-                return math.ceil(x / div)
-
-            total_nihai = v(math.ceil(tr + idara)) if is_multi else v(math.ceil(rasm + idara))
-            omla_label  = "عملة قديمة" if omla == "old" else "عملة جديدة"
-            subtitle = ft.Text(f"العملة المدخلة: {omla_label}", color="white70", size=13, italic=True)
-
-            if is_multi:
-                rows = [
-                    ft.Text(title_text, weight="bold", size=17, color="white"),
-                    subtitle,
-                    result_row("قيمة السند",               math.ceil(qima_orig)),
-                    result_row("الفائدة (10%)",             v(math.ceil(faida))),
-                    result_row("الرسم الاساسي",             v(rasm)),
-                    ft.Text(f"المدة: {sana} سنة  /  {ashhur} شهر  /  {ayam} يوم",
-                            color="white", size=14),
-                    ft.Divider(color="white54"),
-                    result_row("رسم السنوات",               v(rs)),
-                    result_row("رسم الاشهر",                v(ra)),
-                    result_row("رسم الايام",                v(rd)),
-                    result_row("مجموع الرسوم",              v(tr)),
-                    result_row("رسم الادارة المحلية (10%)",  v(idara)),
-                    ft.Divider(color="white54"),
-                ]
-            else:
-                rows = [
-                    ft.Text(title_text, weight="bold", size=17, color="white"),
-                    subtitle,
-                    result_row("قيمة السند",               math.ceil(qima_orig)),
-                    result_row("الفائدة (10%)",             v(math.ceil(faida))),
-                    result_row("الرسم (10% من الفائدة)",    v(rasm)),
-                    result_row("رسم الادارة المحلية (10%)",  v(idara)),
-                    ft.Divider(color="white54"),
-                ]
-
-            if omla == "old":
-                rows.append(result_row("المجموع الكلي (عملة قديمة)", total_nihai, size=17))
-                rows.append(result_row("المجموع الكلي (عملة جديدة)", math.ceil(total_nihai / 100), size=17))
-            else:
-                rows.append(result_row("المجموع الكلي (عملة جديدة)", total_nihai, size=17))
-
-            return make_card(ft.Column(rows), TEAL)
+        dur_seg.on_change = on_dur_change
 
         def calc(e):
-            qima_raw = validate_number(bond_f, "قيمة السند")
-            if qima_raw is None:
-                page.update()
-                return
-
-            omla = currency_rg.value
-            qima = qima_raw * 100 if omla == "new" else qima_raw
-
-            faida = qima * 0.10
-            rasm  = math.ceil(faida * 0.10)
-            results_col.controls.clear()
-
-            if dur_rg.value == "1year":
-                idara = math.ceil(rasm * 0.10)
-                results_col.controls.append(
-                    _build_rea3_card(
-                        "ريع راس المال - سنة واحدة",
-                        qima_orig=qima_raw, omla=omla,
-                        faida=faida, rasm=rasm, idara=idara,
-                    )
-                )
-            else:
-                if selected_dates["bond"] is None:
-                    date_error.value   = "يرجى اختيار تاريخ السند"
-                    date_error.visible = True
+            try:
+                qima_raw = validate_number(bond_f, "قيمة السند")
+                if qima_raw is None:
                     page.update()
                     return
 
-                d1 = selected_dates["bond"]
-                d2 = selected_dates["today"]
+                omla  = list(currency_seg.selected)[0]
+                qima  = qima_raw * 100 if omla == "new" else qima_raw
 
-                if d2 <= d1:
-                    date_error.value   = "يجب ان يكون التاريخ الحالي بعد تاريخ السند"
-                    date_error.visible = True
-                    page.update()
-                    return
+                faida_pct = _sanitize_float(SETTINGS.get("rea3_faida_pct", 10), 10, 0.001, 100) / 100
+                rasm_pct  = _sanitize_float(SETTINGS.get("rea3_rasm_pct",  10), 10, 0.001, 100) / 100
+                idara_pct = _sanitize_float(SETTINGS.get("rea3_idara_pct", 10), 10, 0.001, 100) / 100
 
-                date_error.visible = False
-                delta  = (d2 - d1).days
-                sana   = delta // 365
-                ashhur = (delta % 365) // 30
-                ayam   = (delta % 365) % 30
-                rs     = rasm * sana
-                ra     = math.ceil((rasm * ashhur) / 12)
-                rd     = math.ceil((rasm * ayam) / 365)
-                tr     = rs + ra + rd
-                idara  = math.ceil(tr * 0.10)
+                faida = qima * faida_pct
+                rasm  = safe_ceil(faida * rasm_pct)
+                div   = 100 if omla == "new" else 1
 
-                results_col.controls.append(
-                    _build_rea3_card(
-                        "ريع راس المال - مدة مخصصة",
-                        qima_orig=qima_raw, omla=omla,
-                        faida=faida, rasm=rasm, idara=idara,
-                        tr=tr, sana=sana, ashhur=ashhur, ayam=ayam,
-                        rs=rs, ra=ra, rd=rd, is_multi=True,
-                    )
-                )
+                def v(x):
+                    try:
+                        return safe_ceil(x / div)
+                    except (ZeroDivisionError, TypeError):
+                        return 0
 
+                omla_label = "عملة قديمة" if omla == "old" else "عملة جديدة"
+                results_col.controls.clear()
+
+                if "1year" in dur_seg.selected:
+                    idara = safe_ceil(rasm * idara_pct)
+                    total = v(safe_ceil(rasm + idara))
+
+                    rows = [
+                        ft.Row([
+                            ft.Icon(ft.Icons.TRENDING_UP_ROUNDED,
+                                    color="#00695C", size=20),
+                            ft.Text("ريع رأس المال - سنة واحدة",
+                                    weight="bold", size=15, color="#00695C"),
+                        ], spacing=8),
+                        ft.Container(
+                            content=ft.Text(omla_label, size=11, color="white"),
+                            bgcolor="#00695C",
+                            padding=ft.padding.symmetric(horizontal=10, vertical=3),
+                            border_radius=20,
+                        ),
+                        ft.Divider(height=12),
+                        result_row("قيمة السند",         safe_ceil(qima_raw)),
+                        result_row(f"الفائدة ({int(SETTINGS.get('rea3_faida_pct',10))}%)", v(safe_ceil(faida))),
+                        result_row(f"الرسم ({int(SETTINGS.get('rea3_rasm_pct',10))}%)",    v(rasm)),
+                        result_row(f"رسم الإدارة ({int(SETTINGS.get('rea3_idara_pct',10))}%)", v(idara)),
+                        ft.Divider(height=12),
+                        ft.Row([
+                            ft.Text("المجموع الكلي", weight="bold", size=15),
+                            ft.Text(f"{total:,}", weight="bold", size=18,
+                                    color="#00695C"),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ]
+                    if omla == "old":
+                        rows.append(ft.Row([
+                            ft.Text("بالعملة الجديدة", size=13,
+                                    color="#6B7280"),
+                            ft.Text(f"{safe_ceil(total/100):,}", size=14,
+                                    weight="bold",
+                                    color="#1565C0"),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN))
+                    results_col.controls.append(make_result_card(ft.Column(rows)))
+
+                else:
+                    if selected_dates["bond"] is None:
+                        date_error.value   = "يرجى اختيار تاريخ السند"
+                        date_error.visible = True
+                        page.update()
+                        return
+                    d1, d2 = selected_dates["bond"], selected_dates["today"]
+                    if d2 <= d1:
+                        date_error.value   = "التاريخ الحالي يجب أن يكون بعد تاريخ السند"
+                        date_error.visible = True
+                        page.update()
+                        return
+                    date_error.visible = False
+                    delta  = (d2 - d1).days
+                    sana   = delta // 365
+                    ashhur = (delta % 365) // 30
+                    ayam   = (delta % 365) % 30
+                    rs     = rasm * sana
+                    ra     = safe_ceil((rasm * ashhur) / 12)  if ashhur > 0 else 0
+                    rd     = safe_ceil((rasm * ayam)   / 365) if ayam   > 0 else 0
+                    tr     = rs + ra + rd
+                    idara  = safe_ceil(tr * idara_pct)
+                    total  = v(safe_ceil(tr + idara))
+
+                    rows = [
+                        ft.Row([
+                            ft.Icon(ft.Icons.TRENDING_UP_ROUNDED,
+                                    color="#00695C", size=20),
+                            ft.Text("ريع رأس المال - مدة مخصصة",
+                                    weight="bold", size=15, color="#00695C"),
+                        ], spacing=8),
+                        ft.Container(
+                            content=ft.Text(omla_label, size=11, color="white"),
+                            bgcolor="#00695C",
+                            padding=ft.padding.symmetric(horizontal=10, vertical=3),
+                            border_radius=20,
+                        ),
+                        ft.Divider(height=12),
+                        result_row("قيمة السند", safe_ceil(qima_raw)),
+                        result_row(f"الفائدة ({int(SETTINGS.get('rea3_faida_pct',10))}%)", v(safe_ceil(faida))),
+                        ft.Container(
+                            content=ft.Text(
+                                f"المدة: {sana} سنة  /  {ashhur} شهر  /  {ayam} يوم",
+                                size=13, color="#6B7280"),
+                            bgcolor="#F5F5F5",
+                            padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                            border_radius=10,
+                        ),
+                        ft.Divider(height=8),
+                        result_row("رسم السنوات", v(rs)),
+                        result_row("رسم الأشهر",  v(ra)),
+                        result_row("رسم الأيام",  v(rd)),
+                        result_row("مجموع الرسوم", v(tr)),
+                        result_row("رسم الإدارة", v(idara)),
+                        ft.Divider(height=12),
+                        ft.Row([
+                            ft.Text("المجموع الكلي", weight="bold", size=15),
+                            ft.Text(f"{total:,}", weight="bold", size=18,
+                                    color="#00695C"),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ]
+                    if omla == "old":
+                        rows.append(ft.Row([
+                            ft.Text("بالعملة الجديدة", size=13,
+                                    color="#6B7280"),
+                            ft.Text(f"{safe_ceil(total/100):,}", size=14,
+                                    weight="bold", color="#1565C0"),
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN))
+                    results_col.controls.append(make_result_card(ft.Column(rows)))
+
+            except Exception as ex:
+                print(f"[rea3 calc] {ex}")
+                results_col.controls.clear()
+                results_col.controls.append(make_result_card(
+                    ft.Text("حدث خطأ، يرجى التحقق من البيانات", size=14)))
             page.update()
 
         page.add(ft.Column(
             controls=[
-                section_title("ريع رؤوس الاموال المتداولة", BLUE),
-                ft.Divider(),
-                ft.Text("نوع العملة المدخلة:", weight="bold", color=BLUE),
-                currency_rg, currency_note,
-                ft.Divider(),
+                ft.Container(height=8),
+                ft.Text("نوع العملة المدخلة", size=13,
+                        color="#6B7280"),
+                currency_seg,
+                ft.Container(height=4),
                 bond_f,
-                ft.Text("مدة السند:", weight="bold"),
-                dur_rg, dates_section,
-                calc_btn("احسب", BLUE, calc),
+                ft.Container(height=4),
+                ft.Text("مدة السند", size=13,
+                        color="#6B7280"),
+                dur_seg,
+                dates_section,
+                ft.Container(height=4),
+                primary_btn("احسب", calc, icon=ft.Icons.CALCULATE_ROUNDED),
+                ft.Container(height=4),
                 results_col,
                 ft.Container(height=16),
-                back_btn(show_home),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12, expand=True,
+            spacing=10, expand=True, scroll=ft.ScrollMode.AUTO,
         ))
         page.update()
 
@@ -932,356 +1471,701 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_arbah(e=None):
         page.controls.clear()
+        set_appbar("الارباح الحقيقية")
 
-        currency_rg = ft.RadioGroup(
-            content=ft.Row(
-                [ft.Radio(value="new", label="عملة جديدة"),
-                 ft.Radio(value="old", label="عملة قديمة")],
-                alignment=ft.MainAxisAlignment.CENTER,
-            ),
-            value="new",
+        currency_seg = ft.SegmentedButton(
+            segments=[
+                ft.Segment(value="new", label=ft.Text("عملة جديدة"),
+                           icon=ft.Icon(ft.Icons.FIBER_NEW_ROUNDED)),
+                ft.Segment(value="old", label=ft.Text("عملة قديمة"),
+                           icon=ft.Icon(ft.Icons.HISTORY_ROUNDED)),
+            ],
+            selected=["new"],
+            allow_multiple_selection=False,
         )
-        income_f    = num_field("القيمة المراد حسابها", hint="مثال: 17000000")
-        results_col = ft.Column(spacing=10)
+        income_f    = num_field("القيمة المراد حسابها",
+                                hint="مثال: 17,000,000",
+                                icon=ft.Icons.ACCOUNT_BALANCE_WALLET_OUTLINED)
+        results_col = ft.Column(spacing=8)
 
         def calc(e):
-            mablagh = validate_number(income_f, "القيمة")
-            if mablagh is None:
-                page.update()
-                return
+            try:
+                mablagh = validate_number(income_f, "القيمة")
+                if mablagh is None:
+                    page.update()
+                    return
 
-            omla    = currency_rg.value
-            maffy   = SETTINGS["arbah_old_exempt"] if omla == "old" else SETTINGS["arbah_new_exempt"]
-            sharaeh = SETTINGS["arbah_old_brackets"] if omla == "old" else SETTINGS["arbah_new_brackets"]
-            rasm_idara_pct = SETTINGS["rasm_idara_pct"]
+                omla    = list(currency_seg.selected)[0]
+                maffy   = (SETTINGS["arbah_old_exempt"]
+                           if omla == "old" else SETTINGS["arbah_new_exempt"])
+                sharaeh = (SETTINGS["arbah_old_brackets"]
+                           if omla == "old" else SETTINGS["arbah_new_brackets"])
+                rasm_idara_pct = _sanitize_float(SETTINGS["rasm_idara_pct"], 0.10, 0, 1)
 
-            results_col.controls.clear()
+                results_col.controls.clear()
 
-            if mablagh <= maffy:
-                results_col.controls.append(make_card(
-                    ft.Text(
-                        f"المبلغ ({int(mablagh):,})\n"
-                        f"ضمن الحد المعفى ({int(maffy):,})\n"
-                        f"لا ضريبة مستحقة",
-                        color="white", size=16, text_align="center",
-                    ),
-                    GREEN,
-                ))
-                page.update()
-                return
+                if mablagh <= maffy:
+                    results_col.controls.append(
+                        ft.Card(
+                            content=ft.Container(
+                                content=ft.Column([
+                                    ft.Row([
+                                        ft.Icon(ft.Icons.CHECK_CIRCLE_OUTLINE_ROUNDED,
+                                                color="#00695C", size=28),
+                                        ft.Column([
+                                            ft.Text("ضمن حد الإعفاء",
+                                                    weight="bold", size=15,
+                                                    color="#00695C"),
+                                            ft.Text("لا ضريبة مستحقة",
+                                                    size=13,
+                                                    color="#6B7280"),
+                                        ], spacing=2),
+                                    ], spacing=12),
+                                    ft.Divider(height=12),
+                                    result_row(f"المبلغ المدخل", safe_ceil(mablagh)),
+                                    result_row(f"الحد المعفى",   int(maffy)),
+                                ], spacing=8),
+                                padding=ft.padding.all(16),
+                            ),
+                            elevation=2,
+                            shape=ft.RoundedRectangleBorder(radius=16),
+                        )
+                    )
+                    page.update()
+                    return
 
-            tafaseel, dariba_klia = calc_arbah_brackets(mablagh, sharaeh)
-            rasm_idara  = math.ceil(dariba_klia * rasm_idara_pct)
-            total_qabla = dariba_klia + rasm_idara
-            total_nihai = math.ceil(total_qabla / 100) if omla == "old" else total_qabla
+                tafaseel, dariba_klia = calc_arbah_brackets(mablagh, sharaeh)
+                rasm_idara  = safe_ceil(dariba_klia * rasm_idara_pct)
+                total_qabla = dariba_klia + rasm_idara
+                total_nihai = (safe_ceil(total_qabla / 100)
+                               if omla == "old" else total_qabla)
 
-            rows = [
-                ft.Text("الارباح الحقيقية - تفصيل الشرائح",
-                        weight="bold", size=18, color="white"),
-                result_row("المبلغ الكلي", math.ceil(mablagh)),
-                result_row("الحد المعفى",  maffy),
-                ft.Divider(color="white54"),
-            ]
+                # بطاقة الملخص
+                results_col.controls.append(make_result_card(ft.Column([
+                    ft.Row([
+                        ft.Icon(ft.Icons.SUMMARIZE_OUTLINED,
+                                color="#00695C", size=20),
+                        ft.Text("ملخص الحساب", weight="bold", size=15,
+                                color="#00695C"),
+                    ], spacing=8),
+                    ft.Divider(height=12),
+                    result_row("المبلغ الكلي", safe_ceil(mablagh)),
+                    result_row("الحد المعفى",  int(maffy)),
+                ])))
 
-            for i, sh in enumerate(tafaseel, 1):
-                upper_str = f"{int(sh['upper']):,}" if sh["upper"] != float("inf") else "فما فوق"
-                rows.append(ft.Text(
-                    f"الشريحة {i}  ({sh['pct']:.0f}%)  من {int(sh['lower']):,}  الى {upper_str}",
-                    color="white70", size=13,
-                ))
-                rows.append(ft.Text(
-                    f"    الوعاء: {int(sh['wia3']):,}  |  الضريبة: {int(sh['dariba']):,}",
-                    color="white", size=14,
-                ))
+                # بطاقة الشرائح
+                sh_rows = [
+                    ft.Row([
+                        ft.Icon(ft.Icons.LAYERS_OUTLINED,
+                                color="#1565C0", size=18),
+                        ft.Text("تفصيل الشرائح", weight="bold", size=14,
+                                color="#1565C0"),
+                    ], spacing=8),
+                    ft.Divider(height=10),
+                ]
+                for i, sh in enumerate(tafaseel, 1):
+                    upper_str = (f"{int(sh['upper']):,}"
+                                 if sh["upper"] != float("inf") else "فما فوق")
+                    sh_rows.append(ft.Container(
+                        content=ft.Column([
+                            ft.Text(
+                                f"الشريحة {i}  ·  {sh['pct']:.0f}%"
+                                f"  ·  {int(sh['lower']):,} — {upper_str}",
+                                size=12, color="#6B7280"),
+                            ft.Row([
+                                ft.Text("الوعاء:", size=12),
+                                ft.Text(f"{int(sh['wia3']):,}",
+                                        size=13, weight="bold"),
+                                ft.Container(expand=True),
+                                ft.Text("الضريبة:", size=12),
+                                ft.Text(f"{int(sh['dariba']):,}",
+                                        size=13, weight="bold",
+                                        color="#C62828"),
+                            ]),
+                        ], spacing=4),
+                        bgcolor="#F5F5F5",
+                        padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                        border_radius=10,
+                        margin=ft.margin.symmetric(vertical=3),
+                    ))
+                results_col.controls.append(make_result_card(ft.Column(sh_rows)))
 
-            rows += [
-                ft.Divider(color="white54"),
-                result_row("مجموع الضريبة", dariba_klia, size=17),
-                result_row(f"رسم الادارة المحلية ({int(rasm_idara_pct * 100)}%)", rasm_idara, size=16),
-            ]
+                # بطاقة الإجمالي
+                total_rows = [
+                    ft.Row([
+                        ft.Icon(ft.Icons.RECEIPT_ROUNDED,
+                                color="#00695C", size=20),
+                        ft.Text("الإجمالي النهائي", weight="bold", size=15,
+                                color="#00695C"),
+                    ], spacing=8),
+                    ft.Divider(height=12),
+                    result_row("مجموع الضريبة",   dariba_klia),
+                    result_row(f"رسم الإدارة ({int(rasm_idara_pct*100)}%)",
+                               rasm_idara),
+                ]
+                if omla == "old":
+                    total_rows += [
+                        result_row("المجموع قبل التحويل", total_qabla),
+                        ft.Text("÷ 100 تحويل للعملة الجديدة",
+                                size=12, color="#9E9E9E",
+                                italic=True),
+                    ]
+                total_rows += [
+                    ft.Divider(height=12),
+                    ft.Row([
+                        ft.Text("المجموع النهائي", weight="bold", size=16),
+                        ft.Text(f"{total_nihai:,}", weight="bold", size=20,
+                                color="#00695C"),
+                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ]
+                results_col.controls.append(make_result_card(ft.Column(total_rows)))
 
-            if omla == "old":
-                rows.append(ft.Text(f"المجموع قبل التحويل: {int(total_qabla):,}", color="white70", size=14))
-                rows.append(ft.Text("(مقسوم على 100 - تحويل للعملة الجديدة)", color="white60", size=13))
-
-            rows.append(ft.Divider(color="white54"))
-            rows.append(ft.Text(
-                f"المجموع النهائي للضريبة: {int(total_nihai):,}",
-                weight="bold", size=19, color="white",
-            ))
-
-            results_col.controls.append(make_card(ft.Column(rows), PURPLE))
+            except Exception as ex:
+                print(f"[arbah calc] {ex}")
+                results_col.controls.clear()
+                results_col.controls.append(make_result_card(
+                    ft.Text("حدث خطأ، يرجى التحقق من البيانات", size=14)))
             page.update()
 
         page.add(ft.Column(
             controls=[
-                section_title("الارباح الحقيقية", PURPLE),
-                ft.Divider(),
-                ft.Text("نوع العملة:", weight="bold"),
-                currency_rg,
+                ft.Container(height=8),
+                ft.Text("نوع العملة", size=13,
+                        color="#6B7280"),
+                currency_seg,
+                ft.Container(height=4),
                 income_f,
-                calc_btn("احسب", PURPLE, calc),
+                primary_btn("احسب", calc, icon=ft.Icons.CALCULATE_ROUNDED),
+                ft.Container(height=4),
                 results_col,
                 ft.Container(height=16),
-                back_btn(show_home),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12, expand=True,
+            spacing=10, expand=True, scroll=ft.ScrollMode.AUTO,
         ))
         page.update()
 
     # ══════════════════════════════════════
-    #  5) الإعدادات والنسب
+    #  5) الإعدادات
     # ══════════════════════════════════════
     def show_settings(e=None):
         page.controls.clear()
+        set_appbar("الإعدادات والنسب", show_back=True)
+
+        def settings_tile(title, subtitle, icon, color, handler):
+            return ft.Card(
+                content=ft.ListTile(
+                    leading=ft.Container(
+                        content=ft.Icon(icon, color="white", size=20),
+                        bgcolor=color,
+                        width=40, height=40,
+                        border_radius=10,
+                        alignment=ft.Alignment.CENTER,
+                    ),
+                    title=ft.Text(title, weight="bold", size=14),
+                    subtitle=ft.Text(subtitle, size=11,
+                                     color="#6B7280"),
+                    trailing=ft.Icon(ft.Icons.ARROW_FORWARD_IOS_ROUNDED,
+                                     size=14, color="#9E9E9E"),
+                    on_click=handler,
+                ),
+                elevation=1,
+                margin=ft.margin.symmetric(vertical=4),
+                shape=ft.RoundedRectangleBorder(radius=14),
+            )
+
         page.add(ft.Column(
             controls=[
-                section_title("⚙️ الإعدادات والنسب", TEAL),
-                ft.Divider(),
-                ft.Text("اختر القسم الذي تريد تعديله:", weight="bold", color=TEAL),
                 ft.Container(height=8),
-                menu_btn("إعدادات تحققات الدخل المقطوع", GREEN,   lambda e: show_settings_maqtou3()),
-                ft.Container(height=8),
-                menu_btn("إعدادات ضريبة الدخل المقطوع",  ORANGE,  lambda e: show_settings_dariba()),
-                ft.Container(height=8),
-                menu_btn("إعدادات الارباح الحقيقية",      PURPLE,  lambda e: show_settings_arbah()),
-                ft.Container(height=8),
-                menu_btn("إعدادات عامة",                  TEAL,    lambda e: show_settings_general()),
+                settings_tile("تحققات الدخل المقطوع", "تعديل نسب النفقات والرواتب",
+                              ft.Icons.RECEIPT_LONG_OUTLINED, "#2E7D32",
+                              lambda e: show_settings_maqtou3()),
+                settings_tile("ضريبة الدخل المقطوع", "تعديل الشرائح الضريبية",
+                              ft.Icons.WORK_OUTLINE_ROUNDED, "#E65100",
+                              lambda e: show_settings_dariba()),
+                settings_tile("ريع رؤوس الأموال", "تعديل نسب الفائدة والرسوم",
+                              ft.Icons.TRENDING_UP_ROUNDED, "#1565C0",
+                              lambda e: show_settings_rea3()),
+                settings_tile("الارباح الحقيقية", "تعديل الشرائح والحدود المعفاة",
+                              ft.Icons.ACCOUNT_BALANCE_OUTLINED, "#6A1B9A",
+                              lambda e: show_settings_arbah()),
+                settings_tile("إعدادات عامة", "رسم الإدارة وإعادة التعيين",
+                              ft.Icons.TUNE_ROUNDED, "#00695C",
+                              lambda e: show_settings_general()),
                 ft.Container(height=16),
-                back_btn(show_home),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12, expand=True,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+            spacing=0,
         ))
         page.update()
 
     def _brackets_editor(brackets_key, exempt_key, title, color, back_fn):
-        """محرر الشرائح العام"""
         page.controls.clear()
-        save_msg = ft.Text("", color="green", size=14)
-        exempt_f = num_field("حد الإعفاء", value=int(SETTINGS[exempt_key]))
+        set_appbar(title)
+
+        save_msg = ft.Text("", size=13)
+
+        try:
+            ev = SETTINGS[exempt_key]
+            exempt_val = int(ev) if float(ev) == int(float(ev)) else ev
+        except (TypeError, ValueError):
+            exempt_val = 0
+        exempt_f = num_field("حد الإعفاء", value=exempt_val,
+                              icon=ft.Icons.SHIELD_OUTLINED)
 
         brackets_col = ft.Column(spacing=6)
 
+        def fmt(v):
+            try:
+                fv = float(v)
+                return str(int(fv)) if fv == int(fv) else str(fv)
+            except (TypeError, ValueError):
+                return "0"
+
         def build_bracket_row(idx, bracket):
-            lower = bracket[0]
-            upper = bracket[1] if bracket[1] is not None else ""
-            nisba = int(bracket[2] * 100)
-            lower_f = num_field("من", value=int(lower), width=100)
+            try:
+                lower = bracket[0]
+                upper = bracket[1] if bracket[1] is not None else ""
+                nisba = float(bracket[2]) * 100
+            except (IndexError, TypeError, ValueError):
+                lower, upper, nisba = 0, "", 10
+
+            lower_f = num_field("من",       value=fmt(lower), width=95)
             upper_f = ft.TextField(
-                label="إلى", value=str(upper) if upper != "" else "∞",
-                hint_text="∞ = بلا حد",
-                border_radius=10, text_size=14, width=100,
-                content_padding=ft.padding.symmetric(horizontal=8, vertical=10),
+                label="إلى",
+                value=fmt(upper) if upper != "" else "∞",
+                hint_text="∞",
+                border=ft.InputBorder.OUTLINE,
+                border_radius=12,
+                filled=True,
+                text_size=14, width=95,
+                content_padding=ft.padding.symmetric(horizontal=8, vertical=14),
             )
-            nisba_f = num_field("النسبة %", value=nisba, width=90)
+            nisba_f = num_field("النسبة %", value=fmt(nisba), width=85)
 
             def make_delete(i):
-                def do_delete(e):
-                    SETTINGS[brackets_key].pop(i)
-                    save_data(SETTINGS, page)
-                    _brackets_editor(brackets_key, exempt_key, title, color, back_fn)
+                def do_delete(ev):
+                    try:
+                        SETTINGS[brackets_key].pop(i)
+                        save_data(SETTINGS, page)
+                        _brackets_editor(brackets_key, exempt_key,
+                                         title, color, back_fn)
+                    except (IndexError, KeyError) as ex:
+                        print(f"[delete bracket] {ex}")
                 return do_delete
 
-            return ft.Container(
-                content=ft.Column([
-                    ft.Text(f"الشريحة {idx+1}", size=13, color="grey"),
-                    ft.Row([lower_f, upper_f, nisba_f,
-                            ft.ElevatedButton("حذف", bgcolor=RED, color="white",
-                                              on_click=make_delete(idx), height=40)
-                            ], spacing=6),
-                ]),
-                bgcolor="white", padding=8, border_radius=10,
+            return ft.Card(
+                content=ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Text(f"الشريحة {idx+1}", size=12,
+                                    color="#6B7280",
+                                    weight="bold"),
+                            ft.Container(expand=True),
+                            ft.IconButton(
+                                ft.Icons.DELETE_OUTLINE_ROUNDED,
+                                on_click=make_delete(idx),
+                                icon_color="#C62828",
+                                icon_size=20,
+                                tooltip="حذف الشريحة",
+                            ),
+                        ]),
+                        ft.Row([lower_f, upper_f, nisba_f], spacing=6),
+                    ], spacing=4),
+                    padding=ft.padding.symmetric(horizontal=12, vertical=8),
+                ),
+                elevation=1,
                 margin=ft.margin.symmetric(vertical=3),
-                data={"lower_f": lower_f, "upper_f": upper_f, "nisba_f": nisba_f},
+                shape=ft.RoundedRectangleBorder(radius=12),
+                data={"lower_f": lower_f, "upper_f": upper_f,
+                      "nisba_f": nisba_f},
             )
 
-        bracket_rows = [build_bracket_row(i, b) for i, b in enumerate(SETTINGS[brackets_key])]
-        for r in bracket_rows:
-            brackets_col.controls.append(r)
+        try:
+            for i, b in enumerate(SETTINGS.get(brackets_key, [])):
+                brackets_col.controls.append(build_bracket_row(i, b))
+        except Exception as ex:
+            print(f"[brackets editor build] {ex}")
 
         def save_brackets(e):
             try:
-                new_exempt = float(exempt_f.value or 0)
+                raw_exempt = (exempt_f.value or "0").strip()
+                new_exempt = float(raw_exempt) if raw_exempt not in ("", "∞") else 0
+                if not math.isfinite(new_exempt) or new_exempt < 0:
+                    new_exempt = 0
                 new_brackets = []
                 for row in brackets_col.controls:
-                    d = row.data
-                    lower = float(d["lower_f"].value or 0)
-                    upper_raw = (d["upper_f"].value or "").strip()
-                    upper = None if upper_raw in ["", "∞", "inf"] else float(upper_raw)
-                    nisba = float(d["nisba_f"].value or 0) / 100
-                    new_brackets.append([lower, upper, nisba])
-                SETTINGS[exempt_key]    = new_exempt
+                    try:
+                        d = row.data
+                        lower_raw = (d["lower_f"].value or "0").strip()
+                        upper_raw = (d["upper_f"].value or "").strip()
+                        nisba_raw = (d["nisba_f"].value or "0").strip()
+                        lower = float(lower_raw) if lower_raw else 0
+                        upper = (None if upper_raw in ["", "∞", "inf"]
+                                 else float(upper_raw))
+                        nisba = float(nisba_raw) / 100 if nisba_raw else 0
+                        if not math.isfinite(lower) or lower < 0:
+                            continue
+                        if upper is not None and (not math.isfinite(upper)
+                                                   or upper <= lower):
+                            continue
+                        if not (0 < nisba <= 1):
+                            continue
+                        new_brackets.append([lower, upper, nisba])
+                    except (TypeError, ValueError, KeyError, AttributeError):
+                        continue
+                if not new_brackets:
+                    save_msg.value = "لا توجد شرائح صحيحة للحفظ"
+                    save_msg.color = "#E65100"
+                    page.update()
+                    return
+                SETTINGS[exempt_key]   = new_exempt
                 SETTINGS[brackets_key] = new_brackets
                 save_data(SETTINGS, page)
-                save_msg.value = "✅ تم حفظ الشرائح بنجاح"
-                save_msg.color = "green"
+                save_msg.value = "تم حفظ الشرائح بنجاح"
+                save_msg.color = "#00695C"
             except Exception as ex:
                 save_msg.value = f"خطأ: {ex}"
-                save_msg.color = "red"
+                save_msg.color = "#C62828"
             page.update()
 
         def add_bracket(e):
-            SETTINGS[brackets_key].append([0, None, 0.10])
-            save_data(SETTINGS, page)
-            _brackets_editor(brackets_key, exempt_key, title, color, back_fn)
+            try:
+                if len(SETTINGS.get(brackets_key, [])) >= MAX_BRACKETS:
+                    save_msg.value = f"الحد الأقصى {MAX_BRACKETS} شريحة"
+                    save_msg.color = "#E65100"
+                    page.update()
+                    return
+                SETTINGS[brackets_key].append([0, None, 0.10])
+                save_data(SETTINGS, page)
+                _brackets_editor(brackets_key, exempt_key, title, color, back_fn)
+            except Exception as ex:
+                print(f"[add bracket] {ex}")
 
         page.add(ft.Column(
             controls=[
-                section_title(f"⚙️ {title}", color),
-                ft.Divider(),
-                exempt_f,
-                ft.Divider(),
-                ft.Text("الشرائح الضريبية:", weight="bold", color=color),
-                ft.Text("(من / إلى / النسبة%) - اكتب ∞ في حقل إلى للشريحة الأخيرة",
-                        size=12, color="grey", italic=True),
-                brackets_col,
-                ft.ElevatedButton("+ إضافة شريحة جديدة", bgcolor=color, color="white",
-                                  on_click=add_bracket, width=360, height=44),
-                ft.Divider(),
-                calc_btn("💾 حفظ الشرائح", color, save_brackets),
-                save_msg,
-                ft.Container(height=16),
-                ft.OutlinedButton(
-                    "العودة للإعدادات",
-                    on_click=lambda e: back_fn(), width=360, height=46,
-                    style=ft.ButtonStyle(color=color),
+                ft.Container(height=8),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            ft.Row([
+                                ft.Icon(ft.Icons.SHIELD_OUTLINED,
+                                        color="#00695C", size=18),
+                                ft.Text("حد الإعفاء", weight="bold", size=14),
+                            ], spacing=8),
+                            exempt_f,
+                        ], spacing=10),
+                        padding=ft.padding.all(14),
+                    ),
+                    elevation=1,
+                    shape=ft.RoundedRectangleBorder(radius=14),
                 ),
-                back_btn(show_home),
+                ft.Container(height=8),
+                ft.Row([
+                    ft.Icon(ft.Icons.LAYERS_OUTLINED,
+                            color="#6B7280", size=16),
+                    ft.Text("الشرائح الضريبية", size=13, weight="bold",
+                            color="#6B7280"),
+                    ft.Text("  (∞ = بلا حد)", size=11,
+                            color="#9E9E9E", italic=True),
+                ], spacing=4),
+                brackets_col,
+                tonal_btn("إضافة شريحة جديدة", add_bracket,
+                          icon=ft.Icons.ADD_CIRCLE_OUTLINE_ROUNDED),
+                ft.Container(height=8),
+                primary_btn("حفظ الشرائح", save_brackets,
+                            icon=ft.Icons.SAVE_OUTLINED),
+                save_msg,
+                ft.Container(height=8),
+                tonal_btn("العودة للإعدادات", lambda e: back_fn(),
+                          icon=ft.Icons.ARROW_BACK_ROUNDED),
+                ft.Container(height=16),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12, expand=True,
+            scroll=ft.ScrollMode.AUTO,
+            spacing=8, expand=True,
         ))
         page.update()
 
     def show_settings_maqtou3():
         page.controls.clear()
-        save_msg = ft.Text("", color="green", size=14)
-        nafaqat_f = num_field("نسبة النفقات %",  value=SETTINGS["nafaqat_default"])
-        idara_f   = num_field("نسبة الادارة %",   value=SETTINGS["idara_default"])
-        rawatib_f = num_field("نسبة الرواتب %",   value=SETTINGS["rawatib_default"])
+        set_appbar("إعدادات تحققات الدخل")
+        save_msg = ft.Text("", size=13)
+
+        def fmt(v):
+            try:
+                fv = float(v)
+                return str(int(fv)) if fv == int(fv) else str(fv)
+            except Exception:
+                return str(v)
+
+        nafaqat_f = num_field("نسبة النفقات %",
+                               value=fmt(SETTINGS["nafaqat_default"]),
+                               icon=ft.Icons.PERCENT_ROUNDED)
+        idara_f   = num_field("نسبة الادارة %",
+                               value=fmt(SETTINGS["idara_default"]),
+                               icon=ft.Icons.PERCENT_ROUNDED)
+        rawatib_f = num_field("نسبة الرواتب %",
+                               value=fmt(SETTINGS["rawatib_default"]),
+                               icon=ft.Icons.PERCENT_ROUNDED)
 
         def save(e):
+            v1 = validate_number(nafaqat_f, "نسبة النفقات", max_val=100)
+            v2 = validate_number(idara_f,   "نسبة الادارة", max_val=100)
+            v3 = validate_number(rawatib_f, "نسبة الرواتب", max_val=100)
+            if not all([v1, v2, v3]):
+                page.update()
+                return
             try:
-                SETTINGS["nafaqat_default"] = float(nafaqat_f.value or 3)
-                SETTINGS["idara_default"]   = float(idara_f.value   or 10)
-                SETTINGS["rawatib_default"] = float(rawatib_f.value or 10)
+                SETTINGS["nafaqat_default"] = int(v1) if v1 == int(v1) else v1
+                SETTINGS["idara_default"]   = int(v2) if v2 == int(v2) else v2
+                SETTINGS["rawatib_default"] = int(v3) if v3 == int(v3) else v3
                 save_data(SETTINGS, page)
-                save_msg.value = "✅ تم الحفظ"
-                save_msg.color = "green"
+                save_msg.value = "تم الحفظ بنجاح"
+                save_msg.color = "#00695C"
             except Exception as ex:
                 save_msg.value = f"خطأ: {ex}"
-                save_msg.color = "red"
+                save_msg.color = "#C62828"
             page.update()
 
         page.add(ft.Column(
             controls=[
-                section_title("⚙️ إعدادات تحققات الدخل المقطوع", GREEN),
-                ft.Divider(),
-                nafaqat_f, idara_f, rawatib_f,
-                calc_btn("💾 حفظ", GREEN, save),
-                save_msg,
+                ft.Container(height=8),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            nafaqat_f, idara_f, rawatib_f,
+                            primary_btn("حفظ", save,
+                                        icon=ft.Icons.SAVE_OUTLINED),
+                            save_msg,
+                        ], spacing=12),
+                        padding=ft.padding.all(16),
+                    ),
+                    elevation=1,
+                    shape=ft.RoundedRectangleBorder(radius=16),
+                ),
+                ft.Container(height=8),
+                tonal_btn("العودة للإعدادات", lambda e: show_settings(),
+                          icon=ft.Icons.ARROW_BACK_ROUNDED),
                 ft.Container(height=16),
-                ft.OutlinedButton("العودة للإعدادات", on_click=lambda e: show_settings(),
-                                  width=360, height=46, style=ft.ButtonStyle(color=GREEN)),
-                back_btn(show_home),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12, expand=True,
+            spacing=8, expand=True,
         ))
         page.update()
 
     def show_settings_dariba():
         _brackets_editor("maqtou3_brackets", "maqtou3_exempt",
-                         "إعدادات ضريبة الدخل المقطوع", ORANGE, show_settings)
+                         "شرائح الدخل المقطوع", "#E65100", show_settings)
 
-    def show_settings_arbah():
+    def show_settings_rea3():
         page.controls.clear()
-        save_msg = ft.Text("", color="green", size=14)
-        omla_rg = ft.RadioGroup(
-            content=ft.Row([
-                ft.Radio(value="new", label="عملة جديدة"),
-                ft.Radio(value="old", label="عملة قديمة"),
-            ], alignment=ft.MainAxisAlignment.CENTER),
-            value="new",
-        )
-        edit_btn = ft.ElevatedButton(
-            "تعديل شرائح العملة المختارة", bgcolor=PURPLE, color="white",
-            width=360, height=46,
-        )
+        set_appbar("إعدادات ريع رؤوس الأموال")
+        save_msg = ft.Text("", size=13)
 
-        def go_edit(e):
-            if omla_rg.value == "new":
-                _brackets_editor("arbah_new_brackets", "arbah_new_exempt",
-                                 "أرباح - عملة جديدة", PURPLE, show_settings_arbah)
-            else:
-                _brackets_editor("arbah_old_brackets", "arbah_old_exempt",
-                                 "أرباح - عملة قديمة", PURPLE, show_settings_arbah)
+        def fmt(v):
+            try:
+                fv = float(v)
+                return str(int(fv)) if fv == int(fv) else str(fv)
+            except Exception:
+                return str(v)
 
-        edit_btn.on_click = go_edit
+        faida_f = num_field("نسبة الفائدة %",
+                             value=fmt(SETTINGS.get("rea3_faida_pct", 10)),
+                             icon=ft.Icons.PERCENT_ROUNDED)
+        rasm_f  = num_field("نسبة الرسم %",
+                             value=fmt(SETTINGS.get("rea3_rasm_pct",  10)),
+                             icon=ft.Icons.PERCENT_ROUNDED)
+        idara_f = num_field("نسبة رسم الإدارة %",
+                             value=fmt(SETTINGS.get("rea3_idara_pct", 10)),
+                             icon=ft.Icons.PERCENT_ROUNDED)
+
+        def save(e):
+            v1 = validate_number(faida_f, "نسبة الفائدة", max_val=100)
+            v2 = validate_number(rasm_f,  "نسبة الرسم",   max_val=100)
+            v3 = validate_number(idara_f, "نسبة الإدارة", max_val=100)
+            if not all([v1, v2, v3]):
+                page.update()
+                return
+            try:
+                SETTINGS["rea3_faida_pct"] = v1
+                SETTINGS["rea3_rasm_pct"]  = v2
+                SETTINGS["rea3_idara_pct"] = v3
+                save_data(SETTINGS, page)
+                save_msg.value = "تم الحفظ بنجاح"
+                save_msg.color = "#00695C"
+            except Exception as ex:
+                save_msg.value = f"خطأ: {ex}"
+                save_msg.color = "#C62828"
+            page.update()
 
         page.add(ft.Column(
             controls=[
-                section_title("⚙️ إعدادات الارباح الحقيقية", PURPLE),
-                ft.Divider(),
-                ft.Text("اختر العملة:", weight="bold"),
-                omla_rg,
-                edit_btn,
-                save_msg,
+                ft.Container(height=8),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            faida_f, rasm_f, idara_f,
+                            primary_btn("حفظ", save,
+                                        icon=ft.Icons.SAVE_OUTLINED),
+                            save_msg,
+                        ], spacing=12),
+                        padding=ft.padding.all(16),
+                    ),
+                    elevation=1,
+                    shape=ft.RoundedRectangleBorder(radius=16),
+                ),
+                ft.Container(height=8),
+                tonal_btn("العودة للإعدادات", lambda e: show_settings(),
+                          icon=ft.Icons.ARROW_BACK_ROUNDED),
                 ft.Container(height=16),
-                ft.OutlinedButton("العودة للإعدادات", on_click=lambda e: show_settings(),
-                                  width=360, height=46, style=ft.ButtonStyle(color=PURPLE)),
-                back_btn(show_home),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12, expand=True,
+            spacing=8, expand=True,
+        ))
+        page.update()
+
+    def show_settings_arbah():
+        page.controls.clear()
+        set_appbar("إعدادات الارباح الحقيقية")
+
+        omla_seg = ft.SegmentedButton(
+            segments=[
+                ft.Segment(value="new", label=ft.Text("عملة جديدة")),
+                ft.Segment(value="old", label=ft.Text("عملة قديمة")),
+            ],
+            selected=["new"],
+            allow_multiple_selection=False,
+        )
+
+        def go_edit(e):
+            if "new" in omla_seg.selected:
+                _brackets_editor("arbah_new_brackets", "arbah_new_exempt",
+                                 "أرباح - عملة جديدة", "#6A1B9A",
+                                 show_settings_arbah)
+            else:
+                _brackets_editor("arbah_old_brackets", "arbah_old_exempt",
+                                 "أرباح - عملة قديمة", "#6A1B9A",
+                                 show_settings_arbah)
+
+        page.add(ft.Column(
+            controls=[
+                ft.Container(height=8),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            ft.Row([
+                                ft.Icon(ft.Icons.LAYERS_OUTLINED,
+                                        color="#00695C"),
+                                ft.Text("اختر العملة لتعديل شرائحها",
+                                        weight="bold", size=14),
+                            ], spacing=8),
+                            ft.Divider(height=10),
+                            omla_seg,
+                            primary_btn("تعديل الشرائح", go_edit,
+                                        icon=ft.Icons.EDIT_OUTLINED),
+                        ], spacing=12),
+                        padding=ft.padding.all(16),
+                    ),
+                    elevation=1,
+                    shape=ft.RoundedRectangleBorder(radius=16),
+                ),
+                ft.Container(height=8),
+                tonal_btn("العودة للإعدادات", lambda e: show_settings(),
+                          icon=ft.Icons.ARROW_BACK_ROUNDED),
+                ft.Container(height=16),
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=8, expand=True,
         ))
         page.update()
 
     def show_settings_general():
         page.controls.clear()
-        save_msg = ft.Text("", color="green", size=14)
-        rasm_f = num_field("رسم الادارة المحلية %", value=int(SETTINGS["rasm_idara_pct"] * 100))
+        set_appbar("إعدادات عامة")
+        save_msg = ft.Text("", size=13)
+
+        def fmt(v):
+            try:
+                fv = float(v)
+                return str(int(fv)) if fv == int(fv) else str(fv)
+            except Exception:
+                return str(v)
+
+        rasm_f = num_field("رسم الادارة المحلية %",
+                            value=fmt(SETTINGS["rasm_idara_pct"] * 100),
+                            icon=ft.Icons.PERCENT_ROUNDED)
 
         def save(e):
+            v = validate_number(rasm_f, "رسم الادارة", max_val=100)
+            if v is None:
+                page.update()
+                return
             try:
-                SETTINGS["rasm_idara_pct"] = float(rasm_f.value or 10) / 100
+                SETTINGS["rasm_idara_pct"] = v / 100
                 save_data(SETTINGS, page)
-                save_msg.value = "✅ تم الحفظ"
-                save_msg.color = "green"
+                save_msg.value = "تم الحفظ بنجاح"
+                save_msg.color = "#00695C"
             except Exception as ex:
                 save_msg.value = f"خطأ: {ex}"
-                save_msg.color = "red"
+                save_msg.color = "#C62828"
             page.update()
 
         def reset(e):
-            for key, val in DEFAULT_SETTINGS.items():
-                if key != "mihna_list":
-                    SETTINGS[key] = val
-            save_data(SETTINGS, page)
-            save_msg.value = "✅ تم إعادة التعيين للقيم الافتراضية"
-            save_msg.color = "orange"
+            try:
+                for key, val in DEFAULT_SETTINGS.items():
+                    if key != "mihna_list":
+                        SETTINGS[key] = val
+                save_data(SETTINGS, page)
+                save_msg.value = "تم إعادة التعيين للقيم الافتراضية"
+                save_msg.color = "#E65100"
+            except Exception as ex:
+                save_msg.value = f"خطأ: {ex}"
+                save_msg.color = "#C62828"
             page.update()
             show_settings_general()
 
         page.add(ft.Column(
             controls=[
-                section_title("⚙️ إعدادات عامة", TEAL),
-                ft.Divider(),
-                rasm_f,
-                calc_btn("💾 حفظ", TEAL, save),
-                ft.OutlinedButton("🔄 إعادة تعيين كل الإعدادات للافتراضية",
-                                  on_click=reset, width=360, height=46,
-                                  style=ft.ButtonStyle(color=RED)),
-                save_msg,
+                ft.Container(height=8),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            rasm_f,
+                            primary_btn("حفظ", save,
+                                        icon=ft.Icons.SAVE_OUTLINED),
+                            save_msg,
+                        ], spacing=12),
+                        padding=ft.padding.all(16),
+                    ),
+                    elevation=1,
+                    shape=ft.RoundedRectangleBorder(radius=16),
+                ),
+                ft.Container(height=8),
+                ft.OutlinedButton(
+                    content=ft.Row([
+                        ft.Icon(ft.Icons.RESTART_ALT_ROUNDED,
+                                size=18, color="#C62828"),
+                        ft.Text("إعادة تعيين كل الإعدادات",
+                                size=14, color="#C62828"),
+                    ], tight=True, spacing=8),
+                    on_click=reset,
+                    width=360,
+                    height=46,
+                    style=ft.ButtonStyle(
+                        shape=ft.RoundedRectangleBorder(radius=12),
+                        side=ft.BorderSide(color="#C62828", width=1),
+                    ),
+                ),
+                ft.Container(height=8),
+                tonal_btn("العودة للإعدادات", lambda e: show_settings(),
+                          icon=ft.Icons.ARROW_BACK_ROUNDED),
                 ft.Container(height=16),
-                ft.OutlinedButton("العودة للإعدادات", on_click=lambda e: show_settings(),
-                                  width=360, height=46, style=ft.ButtonStyle(color=TEAL)),
-                back_btn(show_home),
             ],
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            spacing=12, expand=True,
+            spacing=8, expand=True,
         ))
         page.update()
 
