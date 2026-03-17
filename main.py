@@ -63,6 +63,7 @@ DEFAULT_SETTINGS = {
     "rea3_rasm_pct":  10,
     "rea3_idara_pct": 10,
     "mihna_list": [],
+    "dark_mode": False,
 }
 
 
@@ -417,7 +418,6 @@ def tonal_btn(label, handler, icon=None, width=360):
 def main(page: ft.Page):
     page.title      = "حاسبة الدخل"
     page.rtl        = True
-    page.theme_mode = ft.ThemeMode.SYSTEM
     page.theme = ft.Theme(
         color_scheme_seed="#00695C",
         use_material3=True,
@@ -427,6 +427,7 @@ def main(page: ft.Page):
     page.window_height = 820
 
     SETTINGS = load_data(page)
+    page.theme_mode = ft.ThemeMode.DARK if SETTINGS.get("dark_mode", False) else ft.ThemeMode.LIGHT
 
     # ── فهرس البحث ──
     _mihna_index = {}
@@ -469,6 +470,37 @@ def main(page: ft.Page):
             return []
 
     rebuild_index()
+
+    def confirm_dialog(title, message, on_confirm):
+        def close(e):
+            dlg.open = False
+            page.update()
+        def confirm(e):
+            dlg.open = False
+            page.update()
+            on_confirm()
+        dlg = ft.AlertDialog(
+            modal=True,
+            title=ft.Row([
+                ft.Icon(ft.Icons.WARNING_AMBER_ROUNDED, color="#E65100", size=24),
+                ft.Text(title, size=16, weight="bold"),
+            ], spacing=8),
+            content=ft.Text(message, size=14),
+            actions=[
+                ft.TextButton("الغاء", on_click=close,
+                              style=ft.ButtonStyle(color="#6B7280")),
+                ft.FilledButton("تاكيد", on_click=confirm,
+                                style=ft.ButtonStyle(
+                                    bgcolor="#C62828",
+                                    shape=ft.RoundedRectangleBorder(radius=10),
+                                )),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+            shape=ft.RoundedRectangleBorder(radius=16),
+        )
+        page.overlay.append(dlg)
+        dlg.open = True
+        page.update()
 
     # ══════════════════════════════════════
     #  AppBar مشترك
@@ -1010,30 +1042,40 @@ def main(page: ft.Page):
                     try:
                         def make_edit(i):
                             def do_edit(ev2):
-                                try:
-                                    m2 = SETTINGS["mihna_list"][i]
-                                    ism_f.value   = str(m2.get("ism",   ""))
-                                    ramz_f.value  = str(int(m2.get("ramz",  0)))
-                                    ayam_f.value  = str(int(m2.get("ayam",  0)))
-                                    nisba_f.value = str(m2.get("nisba", 0))
-                                    edit_index["i"] = i
-                                    add_msg.value = "جاري التعديل... اضغط حفظ"
-                                    add_msg.color = "#E65100"
-                                except (IndexError, KeyError, TypeError) as ex:
-                                    print(f"[edit] {ex}")
-                                page.update()
+                                def confirmed():
+                                    try:
+                                        m2 = SETTINGS["mihna_list"][i]
+                                        ism_f.value   = str(m2.get("ism",   ""))
+                                        ramz_f.value  = str(int(m2.get("ramz",  0)))
+                                        ayam_f.value  = str(int(m2.get("ayam",  0)))
+                                        nisba_f.value = str(m2.get("nisba", 0))
+                                        edit_index["i"] = i
+                                        add_msg.value = "جاري التعديل... اضغط حفظ"
+                                        add_msg.color = "#E65100"
+                                    except (IndexError, KeyError, TypeError) as ex:
+                                        print(f"[edit] {ex}")
+                                    page.update()
+                                confirm_dialog(
+                                    "تعديل المهنة",
+                                    "هل انت متاكد من تعديل بيانات هذه المهنة؟",
+                                    confirmed,
+                                )
                             return do_edit
 
                         def make_delete(i):
                             def do_delete(ev2):
-                                try:
-                                    SETTINGS["mihna_list"].pop(i)
-                                    save_data(SETTINGS, page)
-                                    rebuild_index()
-                                    refresh_list()
-                                except IndexError:
-                                    pass
-                                page.update()
+                                def confirmed():
+                                    try:
+                                        SETTINGS["mihna_list"].pop(i)
+                                        save_data(SETTINGS, page)
+                                        rebuild_index()
+                                        refresh_list()
+                                    except IndexError:
+                                        pass
+                                    page.update()
+                                confirm_dialog("حذف المهنة",
+                                    "هل انت متاكد من حذف هذه المهنة؟",
+                                    confirmed)
                             return do_delete
 
                         mihna_list_col.controls.append(
@@ -1750,13 +1792,17 @@ def main(page: ft.Page):
 
             def make_delete(i):
                 def do_delete(ev):
-                    try:
-                        SETTINGS[brackets_key].pop(i)
-                        save_data(SETTINGS, page)
-                        _brackets_editor(brackets_key, exempt_key,
-                                         title, color, back_fn)
-                    except (IndexError, KeyError) as ex:
-                        print(f"[delete bracket] {ex}")
+                    def confirmed():
+                        try:
+                            SETTINGS[brackets_key].pop(i)
+                            save_data(SETTINGS, page)
+                            _brackets_editor(brackets_key, exempt_key,
+                                             title, color, back_fn)
+                        except (IndexError, KeyError) as ex:
+                            print(f"[delete bracket] {ex}")
+                    confirm_dialog("حذف الشريحة",
+                        "هل انت متاكد من حذف هذه الشريحة؟",
+                        confirmed)
                 return do_delete
 
             return ft.Card(
@@ -2085,6 +2131,12 @@ def main(page: ft.Page):
         ))
         page.update()
 
+    def toggle_dark_mode(e):
+        SETTINGS["dark_mode"] = e.control.value
+        save_data(SETTINGS, page)
+        page.theme_mode = ft.ThemeMode.DARK if SETTINGS["dark_mode"] else ft.ThemeMode.LIGHT
+        page.update()
+
     def show_settings_general():
         page.controls.clear()
         set_appbar("إعدادات عامة")
@@ -2132,6 +2184,23 @@ def main(page: ft.Page):
 
         page.add(ft.Column(
             controls=[
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Row([
+                            ft.Icon(ft.Icons.DARK_MODE_OUTLINED, color="#00695C"),
+                            ft.Text("الوضع الليلي", weight="bold", size=14),
+                            ft.Container(expand=True),
+                            ft.Switch(
+                                value=SETTINGS.get("dark_mode", False),
+                                active_color="#00695C",
+                                on_change=lambda e: toggle_dark_mode(e),
+                            ),
+                        ], spacing=8),
+                        padding=ft.padding.symmetric(horizontal=16, vertical=12),
+                    ),
+                    elevation=1,
+                    shape=ft.RoundedRectangleBorder(radius=14),
+                ),
                 ft.Container(height=8),
                 ft.Card(
                     content=ft.Container(
