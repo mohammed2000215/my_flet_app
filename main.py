@@ -445,7 +445,22 @@ def main(page: ft.Page):
             nav_stack.clear()
             show_home()
 
-    page.on_back_button_click = go_back
+    def handle_back(e):
+        """يمنع الخروج من التطبيق ويتنقل للخلف بدلاً من ذلك"""
+        if len(nav_stack) > 1:
+            nav_stack.pop()
+            nav_stack[-1]()
+        else:
+            # إذا كنا في الصفحة الرئيسية نعرض تأكيد الخروج
+            def exit_app(ev):
+                page.window_close()
+            confirm_dialog(
+                "الخروج",
+                "هل تريد الخروج من التطبيق؟",
+                exit_app,
+            )
+
+    page.on_back_button_click = handle_back
     page.theme_mode = ft.ThemeMode.DARK if SETTINGS.get("dark_mode", False) else ft.ThemeMode.LIGHT
 
     # ── فهرس البحث ──
