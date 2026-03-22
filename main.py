@@ -428,6 +428,24 @@ def main(page: ft.Page):
     page.window_height = 820
 
     SETTINGS = load_data(page)
+
+    # ── تتبع الصفحة الحالية لزر الرجوع في Android ──
+    nav_stack = []
+
+    def push_page(fn):
+        """أضف صفحة للمكدس"""
+        nav_stack.append(fn)
+
+    def go_back(e=None):
+        """زر الرجوع في Android"""
+        if len(nav_stack) > 1:
+            nav_stack.pop()
+            nav_stack[-1]()
+        else:
+            nav_stack.clear()
+            show_home()
+
+    page.on_back_button_click = go_back
     page.theme_mode = ft.ThemeMode.DARK if SETTINGS.get("dark_mode", False) else ft.ThemeMode.LIGHT
 
     # ── فهرس البحث ──
@@ -538,6 +556,8 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_home(e=None):
         page.controls.clear()
+        nav_stack.clear()
+        nav_stack.append(show_home)
         page.appbar = ft.AppBar(
             title=ft.Text("حاسبة الدخل", size=20, weight="bold", color="white"),
             center_title=True,
@@ -624,6 +644,7 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_maqtou3(e=None):
         page.controls.clear()
+        push_page(show_maqtou3)
         set_appbar("تحققات الدخل المقطوع")
 
         def fmt(v):
@@ -809,6 +830,7 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_dariba_maqtou3(e=None):
         page.controls.clear()
+        push_page(show_dariba_maqtou3)
         set_appbar("ضريبة الدخل المقطوع")
 
         search_f        = text_field("ابحث باسم أو رمز المهنة",
@@ -1257,6 +1279,7 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_rea3(e=None):
         page.controls.clear()
+        push_page(show_rea3)
         set_appbar("ريع رؤوس الاموال")
 
         currency_seg = ft.SegmentedButton(
@@ -1548,6 +1571,7 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_arbah(e=None):
         page.controls.clear()
+        push_page(show_arbah)
         set_appbar("الارباح الحقيقية")
 
         currency_seg = ft.SegmentedButton(
@@ -1728,6 +1752,7 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     def show_settings(e=None):
         page.controls.clear()
+        push_page(show_settings)
         set_appbar("الإعدادات والنسب", show_back=True, back_fn=show_home)
 
         def settings_tile(title, subtitle, icon, color, handler):
