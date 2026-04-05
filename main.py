@@ -451,7 +451,6 @@ def main(page: ft.Page):
             nav_stack.pop()
             nav_stack[-1]()
         else:
-            # إذا كنا في الصفحة الرئيسية نعرض تأكيد الخروج
             def exit_app(ev):
                 page.window_close()
             confirm_dialog(
@@ -459,6 +458,9 @@ def main(page: ft.Page):
                 "هل تريد الخروج من التطبيق؟",
                 exit_app,
             )
+        # منع الخروج الافتراضي
+        if hasattr(e, 'prevent_default'):
+            e.prevent_default()
 
     page.on_back_button_click = handle_back
     page.theme_mode = ft.ThemeMode.DARK if SETTINGS.get("dark_mode", False) else ft.ThemeMode.LIGHT
@@ -539,7 +541,8 @@ def main(page: ft.Page):
     # ══════════════════════════════════════
     #  AppBar مشترك
     # ══════════════════════════════════════
-    def set_appbar(title, show_back=True, show_settings_icon=False, back_fn=None):
+    def make_appbar(title, show_back=True, show_settings_icon=False, back_fn=None):
+        """ينشئ AppBar لاستخدامه في View"""
         actions = []
         if show_settings_icon:
             actions.append(
@@ -551,7 +554,7 @@ def main(page: ft.Page):
                 )
             )
         back_handler = back_fn if back_fn else show_home
-        page.appbar = ft.AppBar(
+        return ft.AppBar(
             leading=ft.IconButton(
                 ft.Icons.ARROW_BACK_IOS_NEW_ROUNDED,
                 on_click=back_handler,
@@ -565,6 +568,57 @@ def main(page: ft.Page):
             elevation=0,
             actions=actions,
         )
+
+    def set_appbar(title, show_back=True, show_settings_icon=False, back_fn=None):
+        """للتوافق مع الكود القديم"""
+        page.appbar = make_appbar(title, show_back, show_settings_icon, back_fn)
+
+    def push_view(route, controls, title, show_back=True, back_fn=None,
+                  show_settings_icon=False, scroll=ft.ScrollMode.AUTO):
+        """يضيف View جديد مع دعم زر الرجوع في Android"""
+        back_handler = back_fn if back_fn else show_home
+
+        def on_confirm_pop(e):
+            e.confirm = True
+            back_handler()
+            page.update()
+
+        view = ft.View(
+            route=route,
+            controls=[
+                ft.Column(
+                    controls=controls,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                    spacing=10,
+                    expand=True,
+                    scroll=scroll,
+                )
+            ],
+            appbar=make_appbar(title, show_back, show_settings_icon, back_fn),
+            padding=ft.padding.only(left=16, right=16, top=0, bottom=16),
+            bgcolor=None,
+            scroll=None,
+            can_pop=show_back,
+            on_confirm_pop=on_confirm_pop if show_back else None,
+            rtl=True,
+        )
+        page.views.append(view)
+        page.update()
+
+    def pop_view():
+        """يرجع للـ View السابق"""
+        if len(page.views) > 1:
+            page.views.pop()
+            page.update()
+
+    def on_view_pop(e):
+        """معالج زر الرجوع في Android"""
+        if len(nav_stack) > 1:
+            nav_stack.pop()
+            nav_stack[-1]()
+        page.update()
+
+    page.on_view_pop = on_view_pop
 
     # ══════════════════════════════════════
     #  الصفحة الرئيسية
@@ -851,7 +905,7 @@ def main(page: ft.Page):
         search_f        = text_field("ابحث باسم أو رمز المهنة",
                                      hint="مثال: محامي أو 101",
                                      icon=ft.Icons.SEARCH_ROUNDED)
-        suggestions_col = ft.Column(spacing=4, visible=False)
+        suggestions_col = ft.ListView(spacing=4, expand=False, visible=False)
         selected_mihna  = {"data": None}
         mihna_info      = ft.Container(visible=False)
         daily_f         = num_field("الدخل اليومي",
@@ -894,7 +948,7 @@ def main(page: ft.Page):
                     suggestions_col.visible = False
             except Exception as ex:
                 print(f"[update_suggestions] {ex}")
-            page.update()
+            suggestions_col.update()
 
         search_f.on_change = update_suggestions
 
@@ -963,7 +1017,9 @@ def main(page: ft.Page):
                 results_col.controls.clear()
             except Exception as ex:
                 print(f"[select_mihna] {ex}")
-            page.update()
+            search_f.update()
+            mihna_info.update()
+            results_col.update()
 
         def calc(e):
             if selected_mihna["data"] is None:
@@ -1096,7 +1152,7 @@ def main(page: ft.Page):
             page.controls.clear()
             set_appbar("إدارة المهن", back_fn=show_dariba_maqtou3)
 
-            mihna_list_col = ft.Column(spacing=6)
+            mihna_list_col = ft.ListView(spacing=6, expand=True, auto_scroll=True)
             ism_f   = text_field("اسم المهنة",       hint="مثال: محامي",
                                   icon=ft.Icons.PERSON_OUTLINE_ROUNDED)
             ramz_f  = num_field("رمز المهنة",          hint="مثال: 101",
@@ -1220,8 +1276,88 @@ def main(page: ft.Page):
                 save_data(SETTINGS, page)
                 rebuild_index()
                 ism_f.value = ramz_f.value = ayam_f.value = nisba_f.value = ""
-                refresh_list()
-                page.update()
+                if edit_index["i"] is not None:
+                    edit_index["i"] = None
+                    refresh_list()
+                else:
+                    # إضافة بطاقة المهنة الجديدة فقط بدون إعادة بناء القائمة
+                    idx = len(SETTINGS["mihna_list"]) - 1
+                    m = SETTINGS["mihna_list"][idx]
+
+                    def make_edit_new(i):
+                        def do_edit(ev2):
+                            def confirmed():
+                                try:
+                                    m2 = SETTINGS["mihna_list"][i]
+                                    ism_f.value   = str(m2.get("ism",   ""))
+                                    ramz_f.value  = str(int(m2.get("ramz",  0)))
+                                    ayam_f.value  = str(int(m2.get("ayam",  0)))
+                                    nisba_f.value = str(m2.get("nisba", 0))
+                                    edit_index["i"] = i
+                                    add_msg.value = "جاري التعديل... اضغط حفظ"
+                                    add_msg.color = "#E65100"
+                                except Exception as ex:
+                                    print(f"[edit] {ex}")
+                                page.update()
+                            confirm_dialog("تعديل المهنة",
+                                "هل انت متاكد من تعديل بيانات هذه المهنة؟",
+                                confirmed)
+                        return do_edit
+
+                    def make_delete_new(i):
+                        def do_delete(ev2):
+                            def confirmed():
+                                try:
+                                    SETTINGS["mihna_list"].pop(i)
+                                    save_data(SETTINGS, page)
+                                    rebuild_index()
+                                    refresh_list()
+                                except IndexError:
+                                    pass
+                                page.update()
+                            confirm_dialog("حذف المهنة",
+                                "هل انت متاكد من حذف هذه المهنة؟",
+                                confirmed)
+                        return do_delete
+
+                    mihna_list_col.controls.append(
+                        ft.Card(
+                            content=ft.ListTile(
+                                leading=ft.Icon(ft.Icons.WORK_OUTLINE_ROUNDED,
+                                                color="#00695C"),
+                                title=ft.Text(
+                                    f"{m.get('ism','?')}  [{m.get('ramz','?')}]",
+                                    weight="bold", size=14),
+                                subtitle=ft.Text(
+                                    f"أيام: {m.get('ayam','?')}"
+                                    f"  ·  ربح: {m.get('nisba','?')}%",
+                                    size=12),
+                                trailing=ft.Row([
+                                    ft.IconButton(
+                                        ft.Icons.EDIT_OUTLINED,
+                                        on_click=make_edit_new(idx),
+                                        icon_color="#00695C",
+                                        tooltip="تعديل",
+                                    ),
+                                    ft.IconButton(
+                                        ft.Icons.DELETE_OUTLINE_ROUNDED,
+                                        on_click=make_delete_new(idx),
+                                        icon_color="#C62828",
+                                        tooltip="حذف",
+                                    ),
+                                ], tight=True, spacing=0),
+                            ),
+                            elevation=1,
+                            margin=ft.margin.symmetric(vertical=3),
+                            shape=ft.RoundedRectangleBorder(radius=14),
+                        )
+                    )
+                    mihna_list_col.update()
+                add_msg.update()
+                ism_f.update()
+                ramz_f.update()
+                ayam_f.update()
+                nisba_f.update()
 
             refresh_list()
 
