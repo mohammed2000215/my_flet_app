@@ -1443,30 +1443,25 @@ def main(page: ft.Page):
                     return
 
                 omla  = list(currency_seg.selected)[0]
-                qima  = qima_raw * 100 if omla == "new" else qima_raw
+                qima  = safe_ceil(qima_raw)
 
                 faida_pct = _sanitize_float(SETTINGS.get("rea3_faida_pct", 10), 10, 0.001, 100) / 100
                 rasm_pct  = _sanitize_float(SETTINGS.get("rea3_rasm_pct",  10), 10, 0.001, 100) / 100
                 idara_pct = _sanitize_float(SETTINGS.get("rea3_idara_pct", 10), 10, 0.001, 100) / 100
 
-                faida = qima * faida_pct
-                rasm  = safe_ceil(faida * rasm_pct)
-                div   = 100 if omla == "new" else 1
-
-                def v(x):
-                    try:
-                        return safe_ceil(x / div)
-                    except (ZeroDivisionError, TypeError):
-                        return 0
+                # كل مرحلة تُقرَّب فوراً (ceil بعد round(x,8) لحماية دقة
+                # الفاصلة العائمة)، والقيمة المُقرَّبة هي ما يُستخدم في
+                # المرحلة التالية مباشرة — تقريب متتالٍ (cascading)،
+                # تماماً كما لو كانت تُحسب يدوياً رقماً بعد رقم.
+                faida = safe_ceil(round(qima * faida_pct, 8))
 
                 omla_label = "عملة قديمة" if omla == "old" else "عملة جديدة"
                 results_col.controls.clear()
 
                 if "1year" in dur_seg.selected:
-                    rasm_disp  = v(rasm)
-                    idara      = safe_ceil(rasm * idara_pct)
-                    idara_disp = v(idara)
-                    total      = rasm_disp + idara_disp
+                    rasm  = safe_ceil(round(faida * rasm_pct, 8))
+                    idara = safe_ceil(round(rasm  * idara_pct, 8))
+                    total = rasm + idara
 
                     rows = [
                         ft.Row([
@@ -1482,10 +1477,10 @@ def main(page: ft.Page):
                             border_radius=20,
                         ),
                         ft.Divider(height=12),
-                        result_row("قيمة السند",         safe_ceil(qima_raw)),
-                        result_row(f"الفائدة ({int(SETTINGS.get('rea3_faida_pct',10))}%)", v(safe_ceil(faida))),
-                        result_row(f"الرسم ({int(SETTINGS.get('rea3_rasm_pct',10))}%)",    rasm_disp),
-                        result_row(f"رسم الإدارة ({int(SETTINGS.get('rea3_idara_pct',10))}%)", idara_disp),
+                        result_row("قيمة السند",         qima),
+                        result_row(f"الفائدة ({int(SETTINGS.get('rea3_faida_pct',10))}%)", faida),
+                        result_row(f"الرسم ({int(SETTINGS.get('rea3_rasm_pct',10))}%)",    rasm),
+                        result_row(f"رسم الإدارة ({int(SETTINGS.get('rea3_idara_pct',10))}%)", idara),
                         ft.Divider(height=12),
                         ft.Row([
                             ft.Text("المجموع الكلي", weight="bold", size=15),
@@ -1519,21 +1514,17 @@ def main(page: ft.Page):
                     delta  = (d2 - d1).days
                     sana, ashhur, ayam = calendar_date_diff(d1, d2)
 
-                    # نُقرّب كل مكوّن من الرسم بعد تحويله للعملة المطلوبة
-                    # (وليس قبل ذلك)، ثم نجمع الأرقام المقرَّبة نفسها
-                    # لحساب المجموع، لضمان أن المجموع المعروض = جمع
-                    # الأسطر المعروضة تماماً ودون أي فرق تقريب.
-                    rs_raw = rasm * sana
-                    ra_raw = (rasm * ashhur) / 12  if ashhur > 0 else 0
-                    rd_raw = (rasm * ayam)   / 365 if ayam   > 0 else 0
-
-                    rs = v(safe_ceil(rs_raw))
-                    ra = v(safe_ceil(ra_raw))
-                    rd = v(safe_ceil(rd_raw))
+                    # كل مكوّن (سنوات/أشهر/أيام) يُحسب مباشرة من "الفائدة"
+                    # المقرَّبة أعلاه، ويُقرَّب فوراً بشكل مستقل. "مجموع
+                    # الرسوم" = جمع هذه القيم المقرَّبة نفسها. "رسم الإدارة"
+                    # يُحسب بدوره من مجموع الرسوم المقرَّب (وليس من مجموع
+                    # القيم الخام قبل تقريبها) — تقريب متتالٍ في كل خطوة.
+                    rs = safe_ceil(round(faida * rasm_pct * sana, 8))              if sana   > 0 else 0
+                    ra = safe_ceil(round(faida * rasm_pct * ashhur / 12, 8))        if ashhur > 0 else 0
+                    rd = safe_ceil(round(faida * rasm_pct * ayam   / 365, 8))       if ayam   > 0 else 0
                     tr = rs + ra + rd
 
-                    idara_raw = (rs_raw + ra_raw + rd_raw) * idara_pct
-                    idara = v(safe_ceil(idara_raw))
+                    idara = safe_ceil(round(tr * idara_pct, 8))
                     total = tr + idara
 
                     rows = [
@@ -1550,8 +1541,8 @@ def main(page: ft.Page):
                             border_radius=20,
                         ),
                         ft.Divider(height=12),
-                        result_row("قيمة السند", safe_ceil(qima_raw)),
-                        result_row(f"الفائدة ({int(SETTINGS.get('rea3_faida_pct',10))}%)", v(safe_ceil(faida))),
+                        result_row("قيمة السند", qima),
+                        result_row(f"الفائدة ({int(SETTINGS.get('rea3_faida_pct',10))}%)", faida),
                         ft.Container(
                             content=ft.Text(
                                 f"المدة: {sana} سنة  /  {ashhur} شهر  /  {ayam} يوم",
